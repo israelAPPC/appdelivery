@@ -58,6 +58,7 @@ Variáveis de ambiente necessárias: ver `.env.example` (Supabase URL/keys, cred
 - Estrutura de endpoints: route handlers em `app/api/<recurso>/route.ts`, um recurso por pasta, verbos HTTP como exports nomeados (`GET`, `POST`)
 - Estrutura de componentes: um componente por arquivo, colocalizado com a rota que o usa quando não é compartilhado; componentes compartilhados em `app/components/`
 - Tipagem: TypeScript estrito (`strict: true`), sem `any` — tipos gerados a partir do schema do Supabase quando possível
+- Route handlers dinâmicos usam `params` como objeto síncrono (`{ params }: { params: { id: string } }`), Next.js 14.x instalado — nunca `Promise<params>`/`await params` (essa é a semântica do Next.js 15, que este projeto não usa)
 
 ## TDD
 - Framework backend: Vitest

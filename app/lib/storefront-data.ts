@@ -1,0 +1,156 @@
+import "server-only";
+import { createClient } from "@supabase/supabase-js";
+import { createSupabaseServerClient } from "./supabase-server";
+import type { Database } from "./database.types";
+
+/**
+ * Leitura de dados públicos usados pelo storefront do cliente (PWA por loja):
+ * dados da loja (vitrine/manifest) e catálogo de produtos disponíveis.
+ *
+ * A migration 0008_stores_public_read_policy.sql adiciona a policy
+ * `stores_select_public_active` (`to anon, authenticated using (is_active
+ * = true)`), que coexiste com `stores_select_own`. Por isso usamos aqui o
+ * client anon (`createSupabaseServerClient()`), nunca o client admin
+ * (`service_role`) — não é necessário contornar RLS para uma leitura
+ * pública de dados não sensíveis (nome, slug, logo, whatsapp, loja ativa).
+ */
+
+export type StorefrontStore = {
+  id: string;
+  slug: string;
+  name: string;
+  logoUrl: string | null;
+  whatsappNumber: string | null;
+  isActive: boolean;
+};
+
+/**
+ * Busca a loja pelo `slug` (rota canônica `/loja/[slug]`). Faz fallback para
+ * buscar por `id` quando o valor recebido parece um UUID e a busca por slug
+ * não encontra nada — cobre o período de transição em que algum client
+ * antigo ainda linka pelo `id` da loja em vez do `slug`.
+ *
+ * Retorna `null` quando a loja não existe ou não está ativa — nunca lança
+ * exceção para "não encontrado" (quem chama decide como tratar, ex.: 404).
+ */
+export async function getStoreBySlug(slugOrId: string): Promise<StorefrontStore | null> {
+  const client = createSupabaseServerClient();
+
+  const bySlug = await client
+    .from("stores")
+    .select("id, slug, name, logo_url, whatsapp_number, is_active")
+    .eq("slug", slugOrId)
+    .maybeSingle();
+
+  const row =
+    bySlug.data ??
+    (isUuid(slugOrId)
+      ? (
+          await client
+            .from("stores")
+            .select("id, slug, name, logo_url, whatsapp_number, is_active")
+            .eq("id", slugOrId)
+            .maybeSingle()
+        ).data
+      : null);
+
+  if (!row || !row.is_active) return null;
+
+  return {
+    id: row.id,
+    slug: row.slug,
+    name: row.name,
+    logoUrl: row.logo_url,
+    whatsappNumber: row.whatsapp_number,
+    isActive: row.is_active,
+  };
+}
+
+function isUuid(value: string): boolean {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
+}
+
+export type StorefrontProduct = {
+  id: string;
+  name: string;
+  price: number;
+  category: string | null;
+  photoUrl: string | null;
+};
+
+const MOCK_PRODUCTS: StorefrontProduct[] = [
+  {
+    id: "mock-1",
+    name: "X-Burger Artesanal",
+    price: 24.9,
+    category: "Lanches",
+    photoUrl: null,
+  },
+  {
+    id: "mock-2",
+    name: "Batata Frita Grande",
+    price: 14.5,
+    category: "Acompanhamentos",
+    photoUrl: null,
+  },
+  {
+    id: "mock-3",
+    name: "Refrigerante Lata",
+    price: 6.0,
+    category: "Bebidas",
+    photoUrl: null,
+  },
+];
+
+/**
+ * Lista os produtos disponíveis (`available: true`) de uma loja para a
+ * vitrine pública. A policy `products_select_public_available` (migration
+ * 0004) já permite leitura anônima filtrada por `available = true`, então
+ * usamos o client anon aqui (nunca o admin — não é necessário).
+ *
+ * Se a query falhar (ex.: ambiente local sem `supabase start`/migrations
+ * aplicadas ainda), cai para produtos mockados, mantendo a vitrine
+ * navegável durante o desenvolvimento em paralelo da Task 2.1. Em caso de
+ * erro real de query (não apenas env não configurada), o erro é logado
+ * antes do fallback para não mascarar bugs de produção silenciosamente.
+ */
+export async function getStoreProducts(storeId: string): Promise<StorefrontProduct[]> {
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+  if (!supabaseUrl || !supabaseAnonKey) return MOCK_PRODUCTS;
+
+  try {
+    const client = createClient<Database>(supabaseUrl, supabaseAnonKey, {
+      auth: { autoRefreshToken: false, persistSession: false },
+    });
+
+    const { data, error } = await client
+      .from("products")
+      .select("id, name, price, category, photo_url")
+      .eq("store_id", storeId)
+      .eq("available", true)
+      .order("category", { ascending: true });
+
+    if (error || !data) {
+      console.error("getStoreProducts: falha ao buscar produtos, usando fallback mockado", {
+        storeId,
+        error,
+      });
+      return MOCK_PRODUCTS;
+    }
+
+    return data.map((product) => ({
+      id: product.id,
+      name: product.name,
+      price: Number(product.price),
+      category: product.category,
+      photoUrl: product.photo_url,
+    }));
+  } catch (error) {
+    console.error("getStoreProducts: exceção ao buscar produtos, usando fallback mockado", {
+      storeId,
+      error,
+    });
+    return MOCK_PRODUCTS;
+  }
+}

@@ -45,32 +45,32 @@
 - Input: Fase 1 concluída
 - Output: `app/api/products/route.ts` (GET/POST), `app/api/products/[id]/route.ts` (PATCH/DELETE), tabela `products` (nome, preço, categoria, foto, disponível)
 - Testes críticos:
-  - [ ] Criar produto com preço negativo é rejeitado (400)
-  - [ ] Produto marcado `disponivel: false` não aparece na listagem pública do storefront
+  - [x] Criar produto com preço negativo é rejeitado (400)
+  - [x] Produto marcado `disponivel: false` não aparece na listagem pública do storefront
 
 #### Task 2.2 — Configuração da loja (dados, logo, frete)
 - Agent: backend-store
 - Input: Fase 1 concluída
 - Output: `app/api/store/route.ts` (GET/PATCH), tabela `stores` com campos `free_radius_km`, `price_per_km`, `logo_url`, horário de funcionamento
 - Testes críticos:
-  - [ ] Upload de logo salva URL válida no Supabase Storage
-  - [ ] `free_radius_km` e `price_per_km` aceitam apenas valores numéricos positivos
+  - [x] Upload de logo salva URL válida no Supabase Storage
+  - [x] `free_radius_km` e `price_per_km` aceitam apenas valores numéricos positivos
 
 #### Task 2.3 — PWA Storefront + manifest dinâmico
 - Agent: frontend-storefront
 - Input: Fase 1 concluída (dados de loja mockados até Task 2.2 terminar)
 - Output: `app/(storefront)/loja/[slug]/page.tsx`, `app/(storefront)/loja/[slug]/manifest.json/route.ts` (gera manifest com nome/ícone da loja)
 - Testes críticos:
-  - [ ] `manifest.json` de loja com logo cadastrada retorna `icons` apontando para a logo correta
-  - [ ] Loja sem logo cadastrada usa ícone padrão do sistema (fallback, sem quebrar o manifest)
+  - [x] `manifest.json` de loja com logo cadastrada retorna `icons` apontando para a logo correta
+  - [x] Loja sem logo cadastrada usa ícone padrão do sistema (fallback, sem quebrar o manifest)
 
 #### Task 2.4 — Central de credenciais de integração da loja
 - Agent: backend-store
 - Input: Task 1.1 concluída (schema base)
 - Output: `supabase/migrations/000X_store_credentials.sql` (tabela `store_credentials`: `store_id`, `provider` (`mercado_pago` | `whatsapp`), `encrypted_value`, `created_at`), `app/api/store/credentials/route.ts` (POST para salvar, GET que retorna apenas status "configurada"/"não configurada" + últimos 4 caracteres), UI em `app/(admin)/configuracoes/integracoes/page.tsx`
 - Testes críticos:
-  - [ ] Chave salva nunca é retornada em texto plano por nenhuma rota GET
-  - [ ] Loja sem `mercado_pago` configurado não consegue habilitar pagamento "pagar agora" no checkout (bloqueio claro, não erro genérico)
+  - [x] Chave salva nunca é retornada em texto plano por nenhuma rota GET
+  - [x] Loja sem `mercado_pago` configurado não consegue habilitar pagamento "pagar agora" no checkout (implementado como `hasProviderConfigured(storeId, provider)` em `app/lib/store-credentials.ts`, para a Task 3.2 consumir)
 
 ### Fase 3 — Carrinho, frete, checkout e painel de pedidos
 > Dependências: Fase 2

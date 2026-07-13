@@ -168,12 +168,18 @@ runIfConfigured("RLS multi-tenant (stores / store_users)", () => {
     if (userBId) await admin.auth.admin.deleteUser(userBId);
   });
 
-  it("usuario da loja A ve apenas a propria loja em stores", async () => {
+  it("usuario da loja A ve a propria loja em stores (e tambem outras lojas ativas, via leitura publica da vitrine)", async () => {
+    // Desde a policy stores_select_public_active (migration 0008), qualquer
+    // usuario autenticado (nao so anonimo) enxerga o id de lojas ativas de
+    // OUTRAS lojas tambem, pois esse e o mesmo dado publico exposto no
+    // storefront (vitrine). Isolamento sensivel de verdade (vinculo
+    // usuario<->loja, permissoes) continua restrito a store_users, testado
+    // separadamente abaixo.
     const { data, error } = await clientA.from("stores").select("id");
     expect(error).toBeNull();
     const ids = (data ?? []).map((row) => row.id);
     expect(ids).toContain(storeAId);
-    expect(ids).not.toContain(storeBId);
+    expect(ids).toContain(storeBId);
   });
 
   it("usuario da loja A nao consegue ler store_users da loja B (RLS bloqueia)", async () => {
@@ -238,9 +244,12 @@ runIfConfigured("RLS multi-tenant (stores / store_users)", () => {
     const { data: seenByA } = await clientA.from("stores").select("id").eq("id", newStoreId);
     expect((seenByA ?? []).map((r) => r.id)).toContain(newStoreId);
 
-    // O usuario B (nao participou da chamada) nunca deve enxergar a loja.
+    // O usuario B (nao participou da chamada) enxerga o id publico da loja
+    // recem-criada apenas porque ela e ativa por padrao (stores_select_public_active,
+    // migration 0008) — mesmo dado que um visitante anonimo veria na vitrine.
+    // O que B nunca deve conseguir e o vinculo de store_users (testado acima).
     const { data: seenByB } = await clientB.from("stores").select("id").eq("id", newStoreId);
-    expect(seenByB ?? []).toEqual([]);
+    expect((seenByB ?? []).map((r) => r.id)).toContain(newStoreId);
 
     // Verifica, via service_role, que o vinculo de admin foi criado apontando
     // exatamente para userAId (nunca para outro usuario).
@@ -256,25 +265,52 @@ runIfConfigured("RLS multi-tenant (stores / store_users)", () => {
     await admin.from("stores").delete().eq("id", newStoreId);
   });
 
-  it("usuario da loja A nao consegue ler diretamente a linha de stores da loja B por id", async () => {
+  it("usuario da loja A consegue ler o id da loja B por id (loja B e ativa, dado publico de vitrine)", async () => {
     const { data, error } = await clientA.from("stores").select("id").eq("id", storeBId);
     expect(error).toBeNull();
-    expect(data).toEqual([]);
+    expect((data ?? []).map((r) => r.id)).toContain(storeBId);
   });
 
-  it("usuario da loja B ve apenas a propria loja, nunca a loja A", async () => {
+  it("usuario da loja B ve a propria loja e tambem a loja A (ambas ativas, dado publico de vitrine)", async () => {
     const { data, error } = await clientB.from("stores").select("id");
     expect(error).toBeNull();
     const ids = (data ?? []).map((row) => row.id);
     expect(ids).toContain(storeBId);
-    expect(ids).not.toContain(storeAId);
+    expect(ids).toContain(storeAId);
   });
 
-  it("query sem store_id no contexto de auth (usuario anonimo) retorna 0 linhas, nunca erro 500", async () => {
-    const { data, error, status } = await anonClient.from("stores").select("id");
+  it("usuario anonimo consegue ler apenas lojas ativas (vitrine publica do storefront), nunca erro 500", async () => {
+    const { data, error, status } = await anonClient
+      .from("stores")
+      .select("id")
+      .in("id", [storeAId, storeBId]);
     expect(status).toBeLessThan(500);
     expect(error).toBeNull();
-    expect(data).toEqual([]);
+    const ids = (data ?? []).map((row) => row.id);
+    // storeA e storeB sao criadas com is_active = true (default), entao o
+    // visitante anonimo deve enxergar ambas via stores_select_public_active.
+    expect(ids).toContain(storeAId);
+    expect(ids).toContain(storeBId);
+  });
+
+  it("usuario anonimo nao consegue ler uma loja inativa (is_active = false)", async () => {
+    const { error: updateError } = await admin
+      .from("stores")
+      .update({ is_active: false })
+      .eq("id", storeAId);
+    expect(updateError).toBeNull();
+
+    try {
+      const { data, error, status } = await anonClient
+        .from("stores")
+        .select("id")
+        .eq("id", storeAId);
+      expect(status).toBeLessThan(500);
+      expect(error).toBeNull();
+      expect(data).toEqual([]);
+    } finally {
+      await admin.from("stores").update({ is_active: true }).eq("id", storeAId);
+    }
   });
 
   it("usuario anonimo nao consegue ler store_users de nenhuma loja", async () => {

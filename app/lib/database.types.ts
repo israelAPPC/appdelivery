@@ -14,6 +14,85 @@ export type Database = {
   }
   public: {
     Tables: {
+      products: {
+        Row: {
+          available: boolean
+          category: string | null
+          created_at: string
+          id: string
+          name: string
+          photo_url: string | null
+          price: number
+          store_id: string
+          updated_at: string
+        }
+        Insert: {
+          available?: boolean
+          category?: string | null
+          created_at?: string
+          id?: string
+          name: string
+          photo_url?: string | null
+          price: number
+          store_id: string
+          updated_at?: string
+        }
+        Update: {
+          available?: boolean
+          category?: string | null
+          created_at?: string
+          id?: string
+          name?: string
+          photo_url?: string | null
+          price?: number
+          store_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "products_store_id_fkey"
+            columns: ["store_id"]
+            isOneToOne: false
+            referencedRelation: "stores"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      store_credentials: {
+        Row: {
+          created_at: string
+          id: string
+          provider: string
+          secret_id: string
+          store_id: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          provider: string
+          secret_id: string
+          store_id: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          provider?: string
+          secret_id?: string
+          store_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "store_credentials_store_id_fkey"
+            columns: ["store_id"]
+            isOneToOne: false
+            referencedRelation: "stores"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       store_users: {
         Row: {
           created_at: string
@@ -63,12 +142,14 @@ export type Database = {
           address_street: string | null
           address_zip_code: string | null
           created_at: string
+          free_radius_km: number | null
           id: string
           is_active: boolean
           logo_url: string | null
           name: string
           opening_hours: Json
           phone: string | null
+          price_per_km: number | null
           slug: string
           updated_at: string
           whatsapp_number: string | null
@@ -83,12 +164,14 @@ export type Database = {
           address_street?: string | null
           address_zip_code?: string | null
           created_at?: string
+          free_radius_km?: number | null
           id?: string
           is_active?: boolean
           logo_url?: string | null
           name: string
           opening_hours?: Json
           phone?: string | null
+          price_per_km?: number | null
           slug: string
           updated_at?: string
           whatsapp_number?: string | null
@@ -103,12 +186,14 @@ export type Database = {
           address_street?: string | null
           address_zip_code?: string | null
           created_at?: string
+          free_radius_km?: number | null
           id?: string
           is_active?: boolean
           logo_url?: string | null
           name?: string
           opening_hours?: Json
           phone?: string | null
+          price_per_km?: number | null
           slug?: string
           updated_at?: string
           whatsapp_number?: string | null
@@ -132,12 +217,14 @@ export type Database = {
           address_street: string | null
           address_zip_code: string | null
           created_at: string
+          free_radius_km: number | null
           id: string
           is_active: boolean
           logo_url: string | null
           name: string
           opening_hours: Json
           phone: string | null
+          price_per_km: number | null
           slug: string
           updated_at: string
           whatsapp_number: string | null
@@ -149,7 +236,19 @@ export type Database = {
           isSetofReturn: false
         }
       }
+      create_vault_secret_for_store: {
+        Args: { p_secret_name: string; p_secret_value: string }
+        Returns: string
+      }
       current_user_store_ids: { Args: never; Returns: string[] }
+      get_decrypted_vault_secret: {
+        Args: { p_secret_id: string }
+        Returns: string
+      }
+      has_store_settings_permission: {
+        Args: { target_store_id: string }
+        Returns: boolean
+      }
       is_store_admin: { Args: { target_store_id: string }; Returns: boolean }
       store_has_users: { Args: { target_store_id: string }; Returns: boolean }
     }
