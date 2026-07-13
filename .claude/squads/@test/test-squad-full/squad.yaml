@@ -1,0 +1,149 @@
+squad:
+  code: frontend-design-squad
+  name: Frontend Design Squad
+  description: Squad especializado em criacao de interfaces frontend de alta qualidade usando Stitch (Google) para geracao de design UI/UX pixel-perfect, com conversao automatica para React/Next.js + shadcn/ui. Pipeline com checkpoints de aprovacao em cada etapa critica.
+  icon: palette
+  version: "1.0.0"
+  category: development
+  tags:
+    - frontend
+    - design
+    - ui-ux
+    - stitch
+    - react
+    - nextjs
+    - shadcn-ui
+    - design-system
+
+  company: "_expxagents/_memory/company.md"
+  preferences: "_expxagents/_memory/preferences.md"
+  memory: "_memory/memories.md"
+
+  target_audience: "CEOs, Product Managers, e desenvolvedores que precisam de interfaces profissionais, nao-genericas, prontas para producao"
+  platform: "Design + Code"
+  format: "frontend-design-package"
+
+  skills:
+    - web_search
+    - web_fetch
+    - code_writer
+    - stitch-design
+    - enhance-prompt
+    - taste-design
+    - design-md
+    - stitch-loop
+    - react-components
+    - shadcn-ui
+
+  schedule:
+    enabled: false
+
+  data: []
+
+  agents:
+    - id: design-chief
+      name: Design Chief
+      icon: crown
+      prompt: agents/design-chief.agent.md
+    - id: ux-architect
+      name: UX Architect
+      icon: layout
+      prompt: agents/ux-architect.agent.md
+    - id: design-system-engineer
+      name: Design System Engineer
+      icon: paintbrush
+      prompt: agents/design-system-engineer.agent.md
+    - id: screen-generator
+      name: Screen Generator
+      icon: monitor
+      prompt: agents/screen-generator.agent.md
+    - id: frontend-converter
+      name: Frontend Converter
+      icon: code
+      prompt: agents/frontend-converter.agent.md
+
+  pipeline:
+    steps:
+      # Fase 0: Pre-validacao de acesso ao Stitch
+      - id: step-00
+        agent: design-chief
+        label: Verificar se o Stitch MCP esta configurado com API key valida
+        execution: inline
+
+      # Fase 1: Estrategia UX
+      - id: step-01
+        agent: design-chief
+        label: Receber brief, diagnosticar projeto e definir escopo de telas
+        execution: inline
+
+      - id: step-02
+        agent: ux-architect
+        label: Criar arquitetura de informacao, fluxos de usuario e inventario de telas
+        deliverFrom: design-chief
+        execution: inline
+
+      - id: step-03
+        type: checkpoint
+        label: Aprovar arquitetura de informacao e inventario de telas
+        options:
+          - approve
+          - reject
+        on_reject: step-02
+
+      # Fase 2: Design System
+      - id: step-04
+        agent: design-system-engineer
+        label: Criar DESIGN.md com tokens, paleta, tipografia e anti-patterns usando taste-design
+        deliverFrom: ux-architect
+        execution: inline
+
+      - id: step-05
+        type: checkpoint
+        label: Aprovar sistema de design (cores, tipografia, componentes)
+        options:
+          - approve
+          - reject
+        on_reject: step-04
+
+      # Fase 3: Geracao de Telas
+      - id: step-06
+        agent: screen-generator
+        label: Gerar tela-hero (tela principal do projeto) via Stitch para validar direcao visual
+        deliverFrom: design-system-engineer
+        execution: inline
+
+      - id: step-07
+        type: checkpoint
+        label: Aprovar direcao visual da tela-hero
+        options:
+          - approve
+          - reject
+        on_reject: step-06
+
+      - id: step-08
+        agent: screen-generator
+        label: Gerar todas as telas restantes via Stitch mantendo consistencia visual
+        deliverFrom: screen-generator
+        execution: inline
+
+      - id: step-09
+        type: checkpoint
+        label: Aprovar todas as telas geradas
+        options:
+          - approve
+          - reject
+        on_reject: step-08
+
+      # Fase 4: Conversao para Codigo
+      - id: step-10
+        agent: frontend-converter
+        label: Converter telas Stitch para React/Next.js + shadcn/ui com componentes tipados
+        deliverFrom: screen-generator
+        execution: inline
+
+      # Fase 5: Entrega
+      - id: step-11
+        agent: design-chief
+        label: Revisar, sintetizar e entregar pacote final (design + codigo + documentacao)
+        deliverFrom: frontend-converter
+        execution: inline

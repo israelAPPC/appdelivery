@@ -1,0 +1,92 @@
+squad:
+  code: devops-squad
+  name: DevOps Squad
+  description: Infrastructure strategy, CI/CD architecture, containerization, orchestration, observability, and platform engineering
+  icon: server
+  version: "1.0.0"
+  category: development
+  tags:
+    - devops
+    - infrastructure
+    - ci-cd
+    - kubernetes
+    - cloud
+    - sre
+
+  company: "_expxagents/_memory/company.md"
+  preferences: "_expxagents/_memory/preferences.md"
+  memory: "_memory/memories.md"
+
+  target_audience: "CTOs, DevOps engineers, platform teams, and engineering leaders"
+  platform: "Report"
+  format: "devops-strategy"
+
+  skills:
+    - web_search
+    - web_fetch
+
+  schedule:
+    enabled: true
+
+  data: []
+
+  agents:
+    - id: devops-chief
+      name: DevOps Chief
+      icon: server
+      prompt: agents/devops-chief.agent.md
+    - id: ci-cd-architect
+      name: CI/CD Architect
+      icon: git-merge
+      prompt: agents/ci-cd-architect.agent.md
+    - id: container-specialist
+      name: Container Specialist
+      icon: box
+      prompt: agents/container-specialist.agent.md
+    - id: kubernetes-architect
+      name: Kubernetes Architect
+      icon: layers
+      prompt: agents/kubernetes-architect.agent.md
+    - id: cloud-architect
+      name: Cloud Architect
+      icon: cloud
+      prompt: agents/cloud-architect.agent.md
+    - id: sre-engineer
+      name: SRE Engineer
+      icon: activity
+      prompt: agents/sre-engineer.agent.md
+    - id: security-ops
+      name: Security Ops Engineer
+      icon: shield
+      prompt: agents/security-ops.agent.md
+    - id: platform-engineer
+      name: Platform Engineer
+      icon: cpu
+      prompt: agents/platform-engineer.agent.md
+
+  pipeline:
+    steps:
+      - id: step-01
+        agent: devops-chief
+        label: Diagnose infrastructure challenge and identify relevant specialists
+        execution: inline
+      - id: step-02
+        agent: devops-chief
+        label: Route to specialists for domain-specific analysis
+        deliverFrom: devops-chief
+        execution: inline
+      - id: step-03
+        agent: devops-chief
+        label: Synthesize infrastructure strategy and validate decisions
+        deliverFrom: devops-chief
+        execution: inline
+      - id: step-04
+        agent: devops-chief
+        label: Design implementation architecture and migration path
+        deliverFrom: devops-chief
+        execution: inline
+      - id: step-05
+        agent: devops-chief
+        label: Final Infrastructure Strategy Report and implementation roadmap
+        deliverFrom: devops-chief
+        execution: inline

@@ -1,0 +1,39 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/*
+  Design tokens do app-delivery.
+  Base neutra quente (stone/oatmeal), 1 cor de destaque (terracota) usada
+  só em ações primárias. Ver DESIGN.md na raiz para o racional completo.
+*/
+:root {
+  --background: 40 20% 98%;
+  --surface: 40 25% 96%;
+  --foreground: 20 10% 15%;
+  --muted: 30 12% 90%;
+  --muted-foreground: 25 8% 45%;
+  --border: 30 12% 87%;
+  --accent: 16 70% 50%;
+  --accent-foreground: 0 0% 100%;
+  --success: 145 55% 34%;
+  --danger: 0 65% 48%;
+}
+
+.dark {
+  --background: 20 8% 10%;
+  --surface: 20 8% 13%;
+  --foreground: 30 15% 92%;
+  --muted: 20 8% 18%;
+  --muted-foreground: 25 8% 62%;
+  --border: 20 8% 22%;
+  --accent: 16 75% 58%;
+  --accent-foreground: 20 10% 10%;
+  --success: 145 50% 45%;
+  --danger: 0 65% 58%;
+}
+
+body {
+  background-color: hsl(var(--background));
+  color: hsl(var(--foreground));
+}

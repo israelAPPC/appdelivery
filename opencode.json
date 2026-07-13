@@ -1,0 +1,13 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "instructions": ["AGENTS.md"],
+  "agent": {
+    "orquestrador": {
+      "mode": "primary",
+      "description": "Ponto de entrada único do projeto no OpenCode — decide qual sub-agent aciona."
+    }
+  },
+  "provider": {
+    "_comment": "Configure aqui o provedor de modelo gratuito que você escolher (ex: Ollama local, Groq, OpenRouter). Ver README em .opencode/ para exemplos de configuração."
+  }
+}

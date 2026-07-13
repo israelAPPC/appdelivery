@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "mercadopago": {
+      "command": "npx",
+      "args": ["tsx", ".mcp/mercadopago-mcp/index.ts"],
+      "env": {
+        "MERCADOPAGO_ACCESS_TOKEN": "${MERCADOPAGO_ACCESS_TOKEN}"
+      }
+    }
+  }
+}

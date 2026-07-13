@@ -1,0 +1,172 @@
+# PLAN.md
+
+## Sprint 1 — Uma loja de teste completa: cliente monta pedido, paga (online ou na entrega), lojista vê e imprime o pedido em tempo real
+> Critério verificável: `npm run test` passa 100% e existe um fluxo end-to-end manual documentado em `tests/e2e/checkout.md` concluído sem erros.
+
+### Fase 1 — Fundação (schema, auth, infra)
+> Dependências: nenhuma
+> Paralelismo: Task 1.1, 1.2 e 1.3 rodam em paralelo (schemas distintos, sem dependência entre si)
+
+#### Task 1.1 — Schema base + RLS multi-tenant
+- Agent: backend-db
+- Input: SPEC.md (módulos 1, 2, 4, 7), CLAUDE.md (padrões de nomenclatura)
+- Output: `supabase/migrations/0001_init.sql` com tabelas `stores`, `users`, `store_users` (papel + permissões JSON), políticas RLS filtrando por `store_id` em todas as tabelas
+- Testes críticos:
+  - [ ] Usuário da loja A não consegue ler/escrever linha de `orders` da loja B (RLS bloqueia)
+  - [ ] Query sem `store_id` no contexto de auth retorna 0 linhas, nunca erro 500
+
+#### Task 1.2 — Auth & permissões por checkbox
+- Agent: backend-auth
+- Input: Task 1.1 concluída (tabela `store_users`)
+- Output: `app/lib/auth.ts` (helpers `getSession`, `getStorePermissions`), `app/api/auth/*/route.ts`
+- Testes críticos:
+  - [ ] Login de funcionário com `permissions: {orders: true, catalog: false}` bloqueia acesso à rota de catálogo
+  - [ ] Admin sempre tem acesso total independente de `permissions`
+
+#### Task 1.3 — Setup Next.js + Vercel + Supabase client
+- Agent: infra
+- Input: CLAUDE.md (stack, estrutura de pastas)
+- Output: projeto Next.js configurado, `app/lib/supabase.ts` (client/server), `.env.example`, deploy inicial na Vercel
+- Testes críticos:
+  - [ ] `GET /api/health` retorna 200
+  - [ ] Build de produção (`next build`) conclui sem erros
+
+### Fase 2 — Catálogo, loja e storefront
+> Dependências: Fase 1
+> Paralelismo: Task 2.1, 2.2, 2.3 e 2.4 rodam em paralelo
+
+#### Task 2.1 — CRUD de produtos e catálogo
+- Agent: backend-catalog
+- Input: Fase 1 concluída
+- Output: `app/api/products/route.ts` (GET/POST), `app/api/products/[id]/route.ts` (PATCH/DELETE), tabela `products` (nome, preço, categoria, foto, disponível)
+- Testes críticos:
+  - [ ] Criar produto com preço negativo é rejeitado (400)
+  - [ ] Produto marcado `disponivel: false` não aparece na listagem pública do storefront
+
+#### Task 2.2 — Configuração da loja (dados, logo, frete)
+- Agent: backend-store
+- Input: Fase 1 concluída
+- Output: `app/api/store/route.ts` (GET/PATCH), tabela `stores` com campos `free_radius_km`, `price_per_km`, `logo_url`, horário de funcionamento
+- Testes críticos:
+  - [ ] Upload de logo salva URL válida no Supabase Storage
+  - [ ] `free_radius_km` e `price_per_km` aceitam apenas valores numéricos positivos
+
+#### Task 2.3 — PWA Storefront + manifest dinâmico
+- Agent: frontend-storefront
+- Input: Fase 1 concluída (dados de loja mockados até Task 2.2 terminar)
+- Output: `app/(storefront)/loja/[slug]/page.tsx`, `app/(storefront)/loja/[slug]/manifest.json/route.ts` (gera manifest com nome/ícone da loja)
+- Testes críticos:
+  - [ ] `manifest.json` de loja com logo cadastrada retorna `icons` apontando para a logo correta
+  - [ ] Loja sem logo cadastrada usa ícone padrão do sistema (fallback, sem quebrar o manifest)
+
+#### Task 2.4 — Central de credenciais de integração da loja
+- Agent: backend-store
+- Input: Task 1.1 concluída (schema base)
+- Output: `supabase/migrations/000X_store_credentials.sql` (tabela `store_credentials`: `store_id`, `provider` (`mercado_pago` | `whatsapp`), `encrypted_value`, `created_at`), `app/api/store/credentials/route.ts` (POST para salvar, GET que retorna apenas status "configurada"/"não configurada" + últimos 4 caracteres), UI em `app/(admin)/configuracoes/integracoes/page.tsx`
+- Testes críticos:
+  - [ ] Chave salva nunca é retornada em texto plano por nenhuma rota GET
+  - [ ] Loja sem `mercado_pago` configurado não consegue habilitar pagamento "pagar agora" no checkout (bloqueio claro, não erro genérico)
+
+### Fase 3 — Carrinho, frete, checkout e painel de pedidos
+> Dependências: Fase 2
+> Paralelismo: Task 3.1, 3.2 e 3.3 rodam em paralelo
+
+#### Task 3.1 — Carrinho + cálculo de frete
+- Agent: frontend-storefront
+- Input: Task 2.1, 2.2, 2.3 concluídas
+- Output: `app/lib/calculate-shipping.ts` (função pura), UI de carrinho em `app/(storefront)/loja/[slug]/carrinho/page.tsx`
+- Testes críticos:
+  - [ ] Endereço dentro do `free_radius_km` → frete = 0
+  - [ ] Endereço fora do raio → frete = distância_km × `price_per_km`
+
+#### Task 3.2 — Checkout: Mercado Pago + pagar na entrega/retirada
+- Agent: backend-payments
+- Input: Task 2.1, 2.2, 2.4 concluídas
+- Output: `app/api/checkout/route.ts` (cria pedido + preferência de pagamento MP usando a credencial própria da loja lida/descriptografada de `store_credentials`, quando aplicável), tabela `orders` com `payment_method` (`mp_online` | `on_delivery`), `payment_status`, `fulfillment_type` (`delivery` | `pickup`)
+- Testes críticos:
+  - [ ] Pedido "pagar na entrega" é criado com `payment_status: pending_offline` sem chamar API do Mercado Pago
+  - [ ] Pedido "pagar agora" gera link de preferência do Checkout Pro usando a credencial da própria loja (não uma chave global), com valor total correto (produtos + frete − cupom)
+
+#### Task 3.3 — Painel de pedidos em tempo real
+- Agent: frontend-admin
+- Input: Task 1.2 concluída, tabela `orders` existente (pode iniciar com mock até 3.2 terminar)
+- Output: `app/(admin)/pedidos/page.tsx`, subscription Supabase Realtime na tabela `orders` filtrada por `store_id`
+- Testes críticos:
+  - [ ] Novo pedido inserido no banco aparece no painel sem reload de página
+  - [ ] Mudança de status (`preparo` → `entrega`) é refletida em tempo real para todos os usuários da loja logados
+
+### Fase 4 — Confirmação de pagamento, impressão e notificação
+> Dependências: Fase 3
+> Paralelismo: Task 4.1, 4.2 e 4.3 rodam em paralelo
+
+#### Task 4.1 — Webhook Mercado Pago
+- Agent: backend-payments
+- Input: Task 3.2 concluída
+- Output: `app/api/webhooks/mercado-pago/route.ts` com validação de assinatura e idempotência
+- Testes críticos:
+  - [ ] Webhook de pagamento aprovado muda `orders.payment_status` para `paid`
+  - [ ] Reenvio do mesmo webhook (mesmo `payment_id`) não duplica atualização nem gera efeito colateral duplo
+
+#### Task 4.2 — Impressão de comanda
+- Agent: frontend-admin
+- Input: Task 3.2, 3.3 concluídas
+- Output: `app/(admin)/pedidos/[id]/imprimir/page.tsx` (layout print-friendly com CSS `@media print`)
+- Testes críticos:
+  - [ ] Comanda renderiza nome da loja, nº do pedido, itens, cliente, endereço (se entrega), forma de pagamento e status pago/a pagar
+  - [ ] Pedido de retirada não exibe campo de endereço de entrega
+
+#### Task 4.3 — Notificação push (status do pedido)
+- Agent: backend-notifications
+- Input: Task 3.3 concluída, ferramenta de push definida (decisão em aberto no CLAUDE.md)
+- Output: `app/lib/notifications.ts`, disparo automático ao mudar `orders.status`
+- Testes críticos:
+  - [ ] Mudança de status dispara 1 notificação (não duplicada) para o cliente do pedido
+  - [ ] Falha no provedor de push não derruba a atualização de status do pedido (não bloqueante)
+
+---
+
+## Sprint 2 — Recursos complementares (avaliações, cupons, relatórios, WhatsApp, comanda avançada)
+> Critério verificável: cada feature abaixo tem teste passando e é demonstrável isoladamente.
+
+### Fase 5 — Engajamento e monetização
+> Dependências: Sprint 1 completo
+> Paralelismo: Task 5.1, 5.2, 5.3, 5.4 rodam todas em paralelo (módulos isolados)
+
+#### Task 5.1 — Avaliação de produtos por estrelas
+- Agent: fullstack-engagement
+- Output: tabela `product_reviews`, componente de avaliação no storefront pós-entrega
+- Testes críticos:
+  - [ ] Cliente só pode avaliar produto de pedido concluído
+  - [ ] Média de estrelas recalculada corretamente ao adicionar nova avaliação
+
+#### Task 5.2 — Cupons de desconto
+- Agent: backend-catalog
+- Output: tabela `coupons`, validação no checkout (Task 3.2)
+- Testes críticos:
+  - [ ] Cupom expirado é rejeitado no checkout
+  - [ ] Cupom de frete grátis zera o valor do frete sem alterar total dos produtos
+
+#### Task 5.3 — Botão WhatsApp no pedido
+- Agent: frontend-storefront
+- Output: componente `WhatsappOrderButton` gerando link `wa.me/<numero_loja>?text=Pedido%20%23<id>`
+- Testes críticos:
+  - [ ] Link gerado contém o número da loja e o número do pedido corretos
+  - [ ] Loja sem número de WhatsApp cadastrado oculta o botão (não gera link quebrado)
+
+#### Task 5.4 — Relatório financeiro básico
+- Agent: backend-reports
+- Output: `app/(admin)/financeiro/page.tsx`, `app/api/reports/sales/route.ts` (filtro por período e forma de pagamento)
+- Testes críticos:
+  - [ ] Filtro "última semana" soma apenas pedidos `payment_status: paid` no intervalo correto
+  - [ ] Segmentação por forma de pagamento bate com a soma total do período
+
+---
+
+## Resumo de paralelismo
+- **Fase 1**: 3 tasks em paralelo (3 agents: backend-db, backend-auth, infra)
+- **Fase 2**: 3 tasks em paralelo (3 agents: backend-catalog, backend-store, frontend-storefront)
+- **Fase 3**: 3 tasks em paralelo (3 agents: frontend-storefront, backend-payments, frontend-admin)
+- **Fase 4**: 3 tasks em paralelo (3 agents: backend-payments, frontend-admin, backend-notifications)
+- **Fase 5**: 4 tasks em paralelo (4 agents: fullstack-engagement, backend-catalog, frontend-storefront, backend-reports)
+
+**Total de agents especializados necessários: 8** (backend-db, backend-auth, infra, backend-catalog, backend-store, frontend-storefront, backend-payments, frontend-admin, backend-notifications, backend-reports, fullstack-engagement — alguns reaproveitados entre fases, contagem única de papéis: 10).

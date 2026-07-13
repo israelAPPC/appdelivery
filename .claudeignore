@@ -1,0 +1,45 @@
+# Dependências
+node_modules/
+.pnp/
+.yarn/
+
+# Build e arquivos gerados
+.next/
+out/
+dist/
+build/
+.vercel/
+.turbo/
+*.tsbuildinfo
+next-env.d.ts
+
+# Segredos e variáveis de ambiente
+.env
+.env.local
+.env.*.local
+.env.production
+.env.development
+*.pem
+*.key
+supabase/.temp/
+
+# Banco de dados local
+*.sqlite
+*.sqlite3
+*.db
+rag.db
+supabase/seed-data/
+
+# Uploads e mídia
+public/uploads/
+storage/
+tmp/uploads/
+
+# Cache e logs
+.cache/
+.eslintcache
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+*.log
+coverage/
