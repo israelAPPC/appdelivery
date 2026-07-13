@@ -24,8 +24,9 @@
 - Input: Task 1.1 concluída (tabela `store_users`)
 - Output: `app/lib/auth.ts` (helpers `getSession`, `getStorePermissions`), `app/api/auth/*/route.ts`
 - Testes críticos:
-  - [ ] Login de funcionário com `permissions: {orders: true, catalog: false}` bloqueia acesso à rota de catálogo
-  - [ ] Admin sempre tem acesso total independente de `permissions`
+  - [x] Login de funcionário com `permissions: {orders: true, catalog: false}` bloqueia acesso à rota de catálogo (via `getStorePermissions`; teste de bloqueio fim a fim na rota de catálogo fica pendente para a Fase 2, quando a rota existir)
+  - [x] Admin sempre tem acesso total independente de `permissions`
+- Decisão (2026-07-13): convite de funcionário usa fluxo de e-mail (`supabase.auth.admin.inviteUserByEmail`) — o funcionário cria a própria senha via link recebido, o admin nunca define/conhece a senha de outro usuário.
 
 #### Task 1.3 — Setup Next.js + Vercel + Supabase client
 - Agent: infra
