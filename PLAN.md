@@ -12,8 +12,12 @@
 - Input: SPEC.md (módulos 1, 2, 4, 7), CLAUDE.md (padrões de nomenclatura)
 - Output: `supabase/migrations/0001_init.sql` com tabelas `stores`, `users`, `store_users` (papel + permissões JSON), políticas RLS filtrando por `store_id` em todas as tabelas
 - Testes críticos:
-  - [ ] Usuário da loja A não consegue ler/escrever linha de `orders` da loja B (RLS bloqueia)
-  - [ ] Query sem `store_id` no contexto de auth retorna 0 linhas, nunca erro 500
+  - [x] Usuário da loja A não consegue ler/escrever linha de `store_users` da loja B (RLS bloqueia)
+  - [x] Usuário da loja A não consegue ler diretamente uma linha de `stores` da loja B por id (RLS bloqueia)
+  - [x] Usuário autenticado não consegue se auto-inserir como admin de uma loja recém-criada por outro usuário (escalonamento de privilégio bloqueado — bootstrap só via `create_store_with_owner`)
+  - [x] Query sem `store_id` no contexto de auth retorna 0 linhas, nunca erro 500
+- Atenção para Task 1.2/2.2: a policy `stores_insert_authenticated` ainda permite insert direto em `stores` fora da RPC `create_store_with_owner`, o que pode criar loja "órfã" sem admin vinculado. Todo fluxo de cadastro de loja (Task 1.2/2.2) deve chamar exclusivamente `create_store_with_owner`, nunca inserir direto na tabela `stores`.
+- Nota: a Task 1.1 não cria a tabela `orders` (isso é escopo da Task 3.2, quando o checkout é implementado). O teste crítico de RLS cross-tenant em `orders` ("usuário da loja A não consegue ler/escrever linha de `orders` da loja B") é responsabilidade da Task 3.2, e deve ser escrito lá quando a tabela existir — não faz parte do critério de conclusão desta task.
 
 #### Task 1.2 — Auth & permissões por checkbox
 - Agent: backend-auth
