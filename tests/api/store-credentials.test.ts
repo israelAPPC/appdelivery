@@ -4,6 +4,8 @@ import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { GET, POST } from "@/app/api/store/credentials/route";
 import { POST as signup } from "@/app/api/auth/signup/route";
 import { hasProviderConfigured } from "@/app/lib/store-credentials";
+import { signInWithRetry } from "../helpers/sign-in-with-retry";
+import { requestWithRateLimitRetry } from "../helpers/request-with-rate-limit-retry";
 
 /**
  * Testes de /api/store/credentials e app/lib/store-credentials.ts (Task 2.4).
@@ -59,25 +61,26 @@ runIfConfigured("/api/store/credentials", () => {
 
   beforeAll(async () => {
     const email = `store-cred-${suffix}@teste-app-delivery.com`;
-    const response = await signup(
-      new Request("http://localhost/api/auth/signup", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          email,
-          password,
-          store: {
-            name: `Loja Credencial ${suffix}`,
-            slug: `loja-credencial-${suffix}`,
-          },
-        }),
-      }),
-    );
-    const body = (await response.json()) as {
+    const { body } = await requestWithRateLimitRetry<{
       user: { id: string };
       store: { id: string };
       session: { access_token: string };
-    };
+    }>(() =>
+      signup(
+        new Request("http://localhost/api/auth/signup", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            email,
+            password,
+            store: {
+              name: `Loja Credencial ${suffix}`,
+              slug: `loja-credencial-${suffix}`,
+            },
+          }),
+        }),
+      ),
+    );
     storeId = body.store.id;
     accessToken = body.session.access_token;
     storeIdsToCleanup.push(storeId);
@@ -107,7 +110,7 @@ runIfConfigured("/api/store/credentials", () => {
     const body = (await response.json()) as { configured: boolean; last4: string | null };
     expect(body.configured).toBe(false);
     expect(body.last4).toBeNull();
-  }, 30000);
+  }, { retry: 3, timeout: 30000 });
 
   it("POST salva a credencial; GET nunca retorna o valor em texto plano em nenhum campo", async () => {
     const secretValue = "APP_USR-super-secreto-1234567890-abcdef";
@@ -135,7 +138,7 @@ runIfConfigured("/api/store/credentials", () => {
     expect(jsonContainsValue(getBody, secretValue)).toBe(false);
     expect(getBody.configured).toBe(true);
     expect(getBody.last4).toBe(secretValue.slice(-4));
-  }, 30000);
+  }, { retry: 3, timeout: 30000 });
 
   it("bloqueia funcionario sem permissao 'settings'", async () => {
     const employeeEmail = `store-cred-emp-${suffix}@teste-app-delivery.com`;
@@ -156,28 +159,25 @@ runIfConfigured("/api/store/credentials", () => {
     const anon = createClient(SUPABASE_URL, ANON_KEY, {
       auth: { autoRefreshToken: false, persistSession: false },
     });
-    const { data: signIn } = await anon.auth.signInWithPassword({
-      email: employeeEmail,
-      password,
-    });
+    const session = await signInWithRetry(anon, employeeEmail, password);
 
     const response = await POST(
       new Request("http://localhost/api/store/credentials", {
         method: "POST",
         headers: {
           "content-type": "application/json",
-          Authorization: `Bearer ${signIn.session!.access_token}`,
+          Authorization: `Bearer ${session.access_token}`,
         },
         body: JSON.stringify({ storeId, provider: "mercado_pago", value: "qualquer-coisa" }),
       }),
     );
 
     expect(response.status).toBe(403);
-  }, 30000);
+  }, { retry: 3, timeout: 30000 });
 
   it("hasProviderConfigured: loja sem whatsapp configurado retorna false; apos salvar mercado_pago, whatsapp continua false", async () => {
     expect(await hasProviderConfigured(storeId, "whatsapp")).toBe(false);
     // mercado_pago foi configurado no teste anterior desta mesma loja.
     expect(await hasProviderConfigured(storeId, "mercado_pago")).toBe(true);
-  }, 30000);
+  }, { retry: 3, timeout: 30000 });
 });

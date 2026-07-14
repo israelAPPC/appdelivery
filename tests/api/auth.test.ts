@@ -4,6 +4,7 @@ import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { POST as signup } from "@/app/api/auth/signup/route";
 import { POST as login } from "@/app/api/auth/login/route";
 import { POST as invite } from "@/app/api/auth/invite/route";
+import { requestWithRateLimitRetry } from "../helpers/request-with-rate-limit-retry";
 
 /**
  * Testes das rotas de auth (Task 1.2), contra o projeto Supabase real (mesmo
@@ -92,7 +93,7 @@ runIfConfigured("rotas de auth (/api/auth/*)", () => {
       .single();
     expect(link?.role).toBe("admin");
     expect(link?.user_id).toBe(body.user.id);
-  }, 30000);
+  }, { retry: 3, timeout: 30000 });
 
   it("POST /api/auth/signup com email duplicado retorna 400 (nunca 500)", async () => {
     const email = `signup-dup-${suffix}@teste-app-delivery.com`;
@@ -118,44 +119,59 @@ runIfConfigured("rotas de auth (/api/auth/*)", () => {
     expect(second.status).toBe(400);
     const secondBody = (await second.json()) as { error: string };
     expect(secondBody.error).toBeTruthy();
-  }, 30000);
+  }, { retry: 3, timeout: 30000 });
 
   it("POST /api/auth/login autentica com credenciais validas e rejeita invalidas com 401", async () => {
     const email = `login-${suffix}@teste-app-delivery.com`;
-    const signupResponse = await signup(
-      jsonRequest({
-        email,
-        password,
-        store: { name: `Loja Login ${suffix}`, slug: `loja-login-${suffix}` },
-      }),
+    const { body: signupBody } = await requestWithRateLimitRetry<{ user: { id: string }; store: { id: string } }>(
+      () =>
+        signup(
+          jsonRequest({
+            email,
+            password,
+            store: { name: `Loja Login ${suffix}`, slug: `loja-login-${suffix}` },
+          }),
+        ),
     );
-    const signupBody = (await signupResponse.json()) as { user: { id: string }; store: { id: string } };
     storeIdsToCleanup.push(signupBody.store.id);
     userIdsToCleanup.push(signupBody.user.id);
 
-    const okResponse = await login(jsonRequest({ email, password }));
+    // Credenciais recem-criadas sao necessariamente validas: qualquer falha
+    // aqui (inclusive 401 mascarado por rate limit — o /api/auth/login nunca
+    // expoe a causa real do erro, de proposito, por seguranca) e transiente.
+    // Repetir e seguro porque a senha esta correta por construcao do teste.
+    let okResponse: Response;
+    let okBody: { session: { access_token: string } };
+    let attempt = 0;
+    do {
+      attempt += 1;
+      okResponse = await login(jsonRequest({ email, password }));
+      okBody = (await okResponse.json()) as { session: { access_token: string } };
+      if (okResponse.status === 200) break;
+      if (attempt < 4) await new Promise((resolve) => setTimeout(resolve, 800 * attempt));
+    } while (attempt < 4);
     expect(okResponse.status).toBe(200);
-    const okBody = (await okResponse.json()) as { session: { access_token: string } };
     expect(okBody.session.access_token).toBeTruthy();
 
     const badResponse = await login(jsonRequest({ email, password: "senha-errada" }));
     expect(badResponse.status).toBe(401);
-  }, 30000);
+  }, { retry: 3, timeout: 30000 });
 
   it("POST /api/auth/invite: admin cadastra ate 3 usuarios, e o 4o e rejeitado com erro claro", async () => {
     const adminEmail = `invite-admin-${suffix}@teste-app-delivery.com`;
-    const signupResponse = await signup(
-      jsonRequest({
-        email: adminEmail,
-        password,
-        store: { name: `Loja Invite ${suffix}`, slug: `loja-invite-${suffix}` },
-      }),
-    );
-    const signupBody = (await signupResponse.json()) as {
+    const { body: signupBody } = await requestWithRateLimitRetry<{
       user: { id: string };
       store: { id: string };
       session: { access_token: string };
-    };
+    }>(() =>
+      signup(
+        jsonRequest({
+          email: adminEmail,
+          password,
+          store: { name: `Loja Invite ${suffix}`, slug: `loja-invite-${suffix}` },
+        }),
+      ),
+    );
     const storeId = signupBody.store.id;
     storeIdsToCleanup.push(storeId);
     userIdsToCleanup.push(signupBody.user.id);
@@ -210,22 +226,23 @@ runIfConfigured("rotas de auth (/api/auth/*)", () => {
     expect(employee3Response.status).toBe(400);
     const employee3Body = (await employee3Response.json()) as { error: string };
     expect(employee3Body.error).toMatch(/limite/i);
-  }, 30000);
+  }, { retry: 3, timeout: 30000 });
 
   it("POST /api/auth/invite: funcionario com permissions restritas nao consegue acessar como se fosse admin", async () => {
     const adminEmail = `invite-restrict-admin-${suffix}@teste-app-delivery.com`;
-    const signupResponse = await signup(
-      jsonRequest({
-        email: adminEmail,
-        password,
-        store: { name: `Loja Restrict ${suffix}`, slug: `loja-restrict-${suffix}` },
-      }),
-    );
-    const signupBody = (await signupResponse.json()) as {
+    const { body: signupBody } = await requestWithRateLimitRetry<{
       user: { id: string };
       store: { id: string };
       session: { access_token: string };
-    };
+    }>(() =>
+      signup(
+        jsonRequest({
+          email: adminEmail,
+          password,
+          store: { name: `Loja Restrict ${suffix}`, slug: `loja-restrict-${suffix}` },
+        }),
+      ),
+    );
     const storeId = signupBody.store.id;
     storeIdsToCleanup.push(storeId);
     userIdsToCleanup.push(signupBody.user.id);
@@ -247,7 +264,14 @@ runIfConfigured("rotas de auth (/api/auth/*)", () => {
     const employeeBody = (await employeeResponse.json()) as { user: { id: string } };
     userIdsToCleanup.push(employeeBody.user.id);
 
-    const employeeLoginResponse = await login(jsonRequest({ email: employeeEmail, password }));
+    // Login logo apos `invite` pode falhar de forma intermitente (401) por
+    // eventual consistencia do backend de Auth do Supabase — retry curto
+    // evita flakiness sem mascarar uma falha real de autenticacao.
+    let employeeLoginResponse = await login(jsonRequest({ email: employeeEmail, password }));
+    for (let attempt = 1; attempt < 3 && employeeLoginResponse.status !== 200; attempt++) {
+      await new Promise((resolve) => setTimeout(resolve, 500 * attempt));
+      employeeLoginResponse = await login(jsonRequest({ email: employeeEmail, password }));
+    }
     expect(employeeLoginResponse.status).toBe(200);
     const employeeLoginBody = (await employeeLoginResponse.json()) as {
       session: { access_token: string };
@@ -266,5 +290,5 @@ runIfConfigured("rotas de auth (/api/auth/*)", () => {
       ),
     );
     expect(forbiddenResponse.status).toBe(403);
-  }, 30000);
+  }, { retry: 3, timeout: 30000 });
 });

@@ -38,6 +38,10 @@ describe("GET /loja/[slug]/manifest.json", () => {
       logoUrl: "https://cdn.exemplo.com/logos/lanchonete-da-esquina.png",
       whatsappNumber: null,
       isActive: true,
+      freeRadiusKm: null,
+      pricePerKm: null,
+      addressLatitude: null,
+      addressLongitude: null,
     });
 
     const response = await GET(new Request("http://localhost/loja/lanchonete-da-esquina/manifest.json"), {
@@ -64,6 +68,10 @@ describe("GET /loja/[slug]/manifest.json", () => {
       logoUrl: null,
       whatsappNumber: null,
       isActive: true,
+      freeRadiusKm: null,
+      pricePerKm: null,
+      addressLatitude: null,
+      addressLongitude: null,
     });
 
     const response = await GET(new Request("http://localhost/loja/sem-logo/manifest.json"), {

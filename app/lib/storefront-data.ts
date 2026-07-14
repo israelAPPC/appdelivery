@@ -22,6 +22,10 @@ export type StorefrontStore = {
   logoUrl: string | null;
   whatsappNumber: string | null;
   isActive: boolean;
+  freeRadiusKm: number | null;
+  pricePerKm: number | null;
+  addressLatitude: number | null;
+  addressLongitude: number | null;
 };
 
 /**
@@ -36,9 +40,12 @@ export type StorefrontStore = {
 export async function getStoreBySlug(slugOrId: string): Promise<StorefrontStore | null> {
   const client = createSupabaseServerClient();
 
+  const storeColumns =
+    "id, slug, name, logo_url, whatsapp_number, is_active, free_radius_km, price_per_km, address_latitude, address_longitude";
+
   const bySlug = await client
     .from("stores")
-    .select("id, slug, name, logo_url, whatsapp_number, is_active")
+    .select(storeColumns)
     .eq("slug", slugOrId)
     .maybeSingle();
 
@@ -48,7 +55,7 @@ export async function getStoreBySlug(slugOrId: string): Promise<StorefrontStore 
       ? (
           await client
             .from("stores")
-            .select("id, slug, name, logo_url, whatsapp_number, is_active")
+            .select(storeColumns)
             .eq("id", slugOrId)
             .maybeSingle()
         ).data
@@ -63,6 +70,10 @@ export async function getStoreBySlug(slugOrId: string): Promise<StorefrontStore 
     logoUrl: row.logo_url,
     whatsappNumber: row.whatsapp_number,
     isActive: row.is_active,
+    freeRadiusKm: row.free_radius_km,
+    pricePerKm: row.price_per_km,
+    addressLatitude: row.address_latitude,
+    addressLongitude: row.address_longitude,
   };
 }
 

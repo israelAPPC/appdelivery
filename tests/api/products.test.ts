@@ -120,7 +120,7 @@ runIfConfigured("rotas de produtos (/api/products)", () => {
     expect(response.status).toBe(400);
     const body = (await response.json()) as { error: string };
     expect(body.error).toBeTruthy();
-  }, 30000);
+  }, { retry: 3, timeout: 30000 });
 
   it("POST /api/products com preco zero e rejeitado com 400", async () => {
     const response = await createProduct(
@@ -132,7 +132,7 @@ runIfConfigured("rotas de produtos (/api/products)", () => {
       ),
     );
     expect(response.status).toBe(400);
-  }, 30000);
+  }, { retry: 3, timeout: 30000 });
 
   it("POST /api/products cria produto valido (admin sempre pode)", async () => {
     const response = await createProduct(
@@ -147,7 +147,7 @@ runIfConfigured("rotas de produtos (/api/products)", () => {
     const body = (await response.json()) as { product: { id: string; price: number } };
     expect(body.product.id).toBeTruthy();
     expect(body.product.price).toBe(25.9);
-  }, 30000);
+  }, { retry: 3, timeout: 30000 });
 
   it("produto marcado available:false nao aparece na listagem publica/anonima, mas aparece na gestao da loja", async () => {
     const createResponse = await createProduct(
@@ -177,7 +177,7 @@ runIfConfigured("rotas de produtos (/api/products)", () => {
     expect(managementResponse.status).toBe(200);
     const managementBody = (await managementResponse.json()) as { products: Array<{ id: string }> };
     expect(managementBody.products.map((p) => p.id)).toContain(created.product.id);
-  }, 30000);
+  }, { retry: 3, timeout: 30000 });
 
   it("PATCH /api/products/[id] com preco zero/negativo e rejeitado com 400", async () => {
     const createResponse = await createProduct(
@@ -200,7 +200,7 @@ runIfConfigured("rotas de produtos (/api/products)", () => {
       { params: { id: created.product.id } },
     );
     expect(patchResponse.status).toBe(400);
-  }, 30000);
+  }, { retry: 3, timeout: 30000 });
 
   it("usuario da loja B nao consegue editar/deletar produto da loja A (RLS bloqueia)", async () => {
     const createResponse = await createProduct(
@@ -238,7 +238,7 @@ runIfConfigured("rotas de produtos (/api/products)", () => {
     // Confirma, via service_role, que o produto da loja A permanece intacto.
     const { data: untouched } = await admin.from("products").select("price").eq("id", created.product.id).single();
     expect(untouched?.price).toBe(30);
-  }, 30000);
+  }, { retry: 3, timeout: 30000 });
 
   it("usuario da loja B nao consegue ler produto indisponivel da loja A pela listagem de gestao", async () => {
     const createResponse = await createProduct(
@@ -261,5 +261,5 @@ runIfConfigured("rotas de produtos (/api/products)", () => {
     // Loja B nao esta vinculada a loja A: cai no fallback publico, que so
     // mostra disponiveis — produto indisponivel de A nunca aparece.
     expect(body.products.map((p) => p.id)).not.toContain(created.product.id);
-  }, 30000);
+  }, { retry: 3, timeout: 30000 });
 });

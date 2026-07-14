@@ -14,6 +14,71 @@ export type Database = {
   }
   public: {
     Tables: {
+      orders: {
+        Row: {
+          created_at: string
+          customer_name: string
+          customer_phone: string
+          delivery_address: Json | null
+          discount: number
+          fulfillment_type: string
+          id: string
+          items: Json
+          order_number: number
+          payment_method: string
+          payment_status: string
+          shipping_cost: number
+          status: string
+          store_id: string
+          subtotal: number
+          total: number
+        }
+        Insert: {
+          created_at?: string
+          customer_name: string
+          customer_phone: string
+          delivery_address?: Json | null
+          discount?: number
+          fulfillment_type: string
+          id?: string
+          items: Json
+          order_number?: number
+          payment_method: string
+          payment_status?: string
+          shipping_cost: number
+          status?: string
+          store_id: string
+          subtotal: number
+          total: number
+        }
+        Update: {
+          created_at?: string
+          customer_name?: string
+          customer_phone?: string
+          delivery_address?: Json | null
+          discount?: number
+          fulfillment_type?: string
+          id?: string
+          items?: Json
+          order_number?: number
+          payment_method?: string
+          payment_status?: string
+          shipping_cost?: number
+          status?: string
+          store_id?: string
+          subtotal?: number
+          total?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "orders_store_id_fkey"
+            columns: ["store_id"]
+            isOneToOne: false
+            referencedRelation: "stores"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       products: {
         Row: {
           available: boolean

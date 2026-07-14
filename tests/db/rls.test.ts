@@ -1,6 +1,8 @@
 import "dotenv/config";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
+import { signInWithRetry } from "../helpers/sign-in-with-retry";
+import { createUserWithRetry } from "../helpers/create-user-with-retry";
 
 /**
  * Testes de RLS multi-tenant (Task 1.1).
@@ -107,21 +109,11 @@ runIfConfigured("RLS multi-tenant (stores / store_users)", () => {
     storeBId = storeB.id;
 
     // Cria dois usuarios de auth, um para cada loja.
-    const { data: userA, error: userAError } = await admin.auth.admin.createUser({
-      email: storeAEmail,
-      password,
-      email_confirm: true,
-    });
-    if (userAError) throw userAError;
-    userAId = userA.user.id;
+    const userA = await createUserWithRetry(admin, { email: storeAEmail, password, email_confirm: true });
+    userAId = userA.id;
 
-    const { data: userB, error: userBError } = await admin.auth.admin.createUser({
-      email: storeBEmail,
-      password,
-      email_confirm: true,
-    });
-    if (userBError) throw userBError;
-    userBId = userB.user.id;
+    const userB = await createUserWithRetry(admin, { email: storeBEmail, password, email_confirm: true });
+    userBId = userB.id;
 
     // Vincula cada usuario como admin da sua respectiva loja (bootstrap via service_role).
     const { error: linkAError } = await admin
@@ -138,20 +130,12 @@ runIfConfigured("RLS multi-tenant (stores / store_users)", () => {
     clientA = createClient(SUPABASE_URL, ANON_KEY, {
       auth: { autoRefreshToken: false, persistSession: false },
     });
-    const { error: signInAError } = await clientA.auth.signInWithPassword({
-      email: storeAEmail,
-      password,
-    });
-    if (signInAError) throw signInAError;
+    await signInWithRetry(clientA, storeAEmail, password);
 
     clientB = createClient(SUPABASE_URL, ANON_KEY, {
       auth: { autoRefreshToken: false, persistSession: false },
     });
-    const { error: signInBError } = await clientB.auth.signInWithPassword({
-      email: storeBEmail,
-      password,
-    });
-    if (signInBError) throw signInBError;
+    await signInWithRetry(clientB, storeBEmail, password);
 
     anonClient = createClient(SUPABASE_URL, ANON_KEY, {
       auth: { autoRefreshToken: false, persistSession: false },

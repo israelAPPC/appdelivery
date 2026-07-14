@@ -2,6 +2,8 @@ import "dotenv/config";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { getStorePermissions } from "@/app/lib/auth";
+import { signInWithRetry } from "../helpers/sign-in-with-retry";
+import { createUserWithRetry } from "../helpers/create-user-with-retry";
 
 /**
  * Testes de `getStorePermissions` (Task 1.2).
@@ -59,21 +61,11 @@ runIfConfigured("getStorePermissions", () => {
     const adminEmail = `auth-admin-${suffix}@teste-app-delivery.com`;
     const employeeEmail = `auth-employee-${suffix}@teste-app-delivery.com`;
 
-    const { data: adminUser, error: adminUserError } = await admin.auth.admin.createUser({
-      email: adminEmail,
-      password,
-      email_confirm: true,
-    });
-    if (adminUserError) throw adminUserError;
-    adminUserId = adminUser.user.id;
+    const adminUser = await createUserWithRetry(admin, { email: adminEmail, password, email_confirm: true });
+    adminUserId = adminUser.id;
 
-    const { data: employeeUser, error: employeeUserError } = await admin.auth.admin.createUser({
-      email: employeeEmail,
-      password,
-      email_confirm: true,
-    });
-    if (employeeUserError) throw employeeUserError;
-    employeeUserId = employeeUser.user.id;
+    const employeeUser = await createUserWithRetry(admin, { email: employeeEmail, password, email_confirm: true });
+    employeeUserId = employeeUser.id;
 
     // Admin com permissions "restritivas" salva por engano — deve ser
     // ignorado: admin sempre tem acesso total.
@@ -97,20 +89,12 @@ runIfConfigured("getStorePermissions", () => {
     adminClient = createClient(SUPABASE_URL, ANON_KEY, {
       auth: { autoRefreshToken: false, persistSession: false },
     });
-    const { error: adminSignInError } = await adminClient.auth.signInWithPassword({
-      email: adminEmail,
-      password,
-    });
-    if (adminSignInError) throw adminSignInError;
+    await signInWithRetry(adminClient, adminEmail, password);
 
     employeeClient = createClient(SUPABASE_URL, ANON_KEY, {
       auth: { autoRefreshToken: false, persistSession: false },
     });
-    const { error: employeeSignInError } = await employeeClient.auth.signInWithPassword({
-      email: employeeEmail,
-      password,
-    });
-    if (employeeSignInError) throw employeeSignInError;
+    await signInWithRetry(employeeClient, employeeEmail, password);
   }, 30000);
 
   afterAll(async () => {

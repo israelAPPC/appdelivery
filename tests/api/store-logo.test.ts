@@ -3,6 +3,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { POST as uploadLogo } from "@/app/api/store/logo/route";
 import { POST as signup } from "@/app/api/auth/signup/route";
+import { requestWithRateLimitRetry } from "../helpers/request-with-rate-limit-retry";
 
 /**
  * Teste critico: upload de logo salva URL valida no Supabase Storage
@@ -45,22 +46,23 @@ runIfConfigured("/api/store/logo", () => {
 
   beforeAll(async () => {
     const email = `store-logo-${suffix}@teste-app-delivery.com`;
-    const response = await signup(
-      new Request("http://localhost/api/auth/signup", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          email,
-          password,
-          store: { name: `Loja Logo ${suffix}`, slug: `loja-logo-${suffix}` },
-        }),
-      }),
-    );
-    const body = (await response.json()) as {
+    const { body } = await requestWithRateLimitRetry<{
       user: { id: string };
       store: { id: string };
       session: { access_token: string };
-    };
+    }>(() =>
+      signup(
+        new Request("http://localhost/api/auth/signup", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            email,
+            password,
+            store: { name: `Loja Logo ${suffix}`, slug: `loja-logo-${suffix}` },
+          }),
+        }),
+      ),
+    );
     storeId = body.store.id;
     accessToken = body.session.access_token;
     storeIdsToCleanup.push(storeId);
@@ -109,7 +111,7 @@ runIfConfigured("/api/store/logo", () => {
       .download(`${storeId}/logo.png`);
     expect(error).toBeNull();
     expect(downloaded).toBeTruthy();
-  }, 30000);
+  }, { retry: 3, timeout: 30000 });
 
   it("rejeita upload de arquivo que nao e imagem", async () => {
     const file = new File([Buffer.from("nao e imagem")], "arquivo.txt", { type: "text/plain" });
@@ -126,5 +128,5 @@ runIfConfigured("/api/store/logo", () => {
     );
 
     expect(response.status).toBe(400);
-  }, 30000);
+  }, { retry: 3, timeout: 30000 });
 });

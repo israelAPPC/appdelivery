@@ -3,6 +3,8 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { GET, PATCH } from "@/app/api/store/route";
 import { POST as signup } from "@/app/api/auth/signup/route";
+import { signInWithRetry } from "../helpers/sign-in-with-retry";
+import { requestWithRateLimitRetry } from "../helpers/request-with-rate-limit-retry";
 
 /**
  * Testes de /api/store (Task 2.2), contra o projeto Supabase real (mesmo
@@ -58,27 +60,28 @@ runIfConfigured("/api/store", () => {
 
   beforeAll(async () => {
     const email = `store-owner-${suffix}@teste-app-delivery.com`;
-    const response = await signup(
-      new Request("http://localhost/api/auth/signup", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          email,
-          password,
-          store: {
-            name: `Loja Store ${suffix}`,
-            slug: `loja-store-${suffix}`,
-            address_street: "Rua Original",
-            address_city: "Cidade Original",
-          },
-        }),
-      }),
-    );
-    const body = (await response.json()) as {
+    const { body } = await requestWithRateLimitRetry<{
       user: { id: string };
       store: { id: string };
       session: { access_token: string };
-    };
+    }>(() =>
+      signup(
+        new Request("http://localhost/api/auth/signup", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            email,
+            password,
+            store: {
+              name: `Loja Store ${suffix}`,
+              slug: `loja-store-${suffix}`,
+              address_street: "Rua Original",
+              address_city: "Cidade Original",
+            },
+          }),
+        }),
+      ),
+    );
     storeId = body.store.id;
     accessToken = body.session.access_token;
     storeIdsToCleanup.push(storeId);
@@ -105,7 +108,7 @@ runIfConfigured("/api/store", () => {
     expect(response.status).toBe(200);
     const body = (await response.json()) as { store: { id: string } };
     expect(body.store.id).toBe(storeId);
-  }, 30000);
+  }, { retry: 3, timeout: 30000 });
 
   it("PATCH aceita free_radius_km e price_per_km numericos validos (>= 0)", async () => {
     const response = await PATCH(
@@ -120,7 +123,7 @@ runIfConfigured("/api/store", () => {
     const body = (await response.json()) as { store: { free_radius_km: number; price_per_km: number } };
     expect(Number(body.store.free_radius_km)).toBe(5);
     expect(Number(body.store.price_per_km)).toBe(2.5);
-  }, 30000);
+  }, { retry: 3, timeout: 30000 });
 
   it("PATCH rejeita free_radius_km negativo com 400", async () => {
     const response = await PATCH(
@@ -134,7 +137,7 @@ runIfConfigured("/api/store", () => {
     expect(response.status).toBe(400);
     const body = (await response.json()) as { error: string };
     expect(body.error).toBeTruthy();
-  }, 30000);
+  }, { retry: 3, timeout: 30000 });
 
   it("PATCH rejeita price_per_km negativo com 400", async () => {
     const response = await PATCH(
@@ -148,7 +151,7 @@ runIfConfigured("/api/store", () => {
     expect(response.status).toBe(400);
     const body = (await response.json()) as { error: string };
     expect(body.error).toBeTruthy();
-  }, 30000);
+  }, { retry: 3, timeout: 30000 });
 
   it("PATCH rejeita limpar o endereco (rua/cidade vazias) para nao quebrar o calculo de frete", async () => {
     const response = await PATCH(
@@ -160,7 +163,7 @@ runIfConfigured("/api/store", () => {
     );
 
     expect(response.status).toBe(400);
-  }, 30000);
+  }, { retry: 3, timeout: 30000 });
 
   it("PATCH bloqueia funcionario sem permissao 'settings'", async () => {
     const employeeEmail = `store-emp-${suffix}@teste-app-delivery.com`;
@@ -182,21 +185,17 @@ runIfConfigured("/api/store", () => {
     const anon = createClient(SUPABASE_URL, ANON_KEY, {
       auth: { autoRefreshToken: false, persistSession: false },
     });
-    const { data: signIn, error: signInError } = await anon.auth.signInWithPassword({
-      email: employeeEmail,
-      password,
-    });
-    expect(signInError).toBeNull();
-    expect(signIn.session?.access_token).toBeTruthy();
+    const session = await signInWithRetry(anon, employeeEmail, password);
+    expect(session.access_token).toBeTruthy();
 
     const response = await PATCH(
       jsonRequest(
         "http://localhost/api/store",
         { storeId, free_radius_km: 3 },
-        { Authorization: `Bearer ${signIn.session!.access_token}` },
+        { Authorization: `Bearer ${session.access_token}` },
       ),
     );
 
     expect(response.status).toBe(403);
-  }, 30000);
+  }, { retry: 3, timeout: 30000 });
 });

@@ -1,6 +1,8 @@
 import "dotenv/config";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
+import { signInWithRetry } from "../helpers/sign-in-with-retry";
+import { createUserWithRetry } from "../helpers/create-user-with-retry";
 
 /**
  * Testes de RLS/schema da tabela `products` (Task 2.1), no mesmo padrao de
@@ -66,30 +68,20 @@ runIfConfigured("RLS/schema da tabela products", () => {
     if (storeBError) throw storeBError;
     storeBId = storeB.id;
 
-    const { data: userA, error: userAError } = await admin.auth.admin.createUser({
-      email: emailA,
-      password,
-      email_confirm: true,
-    });
-    if (userAError) throw userAError;
-    userAId = userA.user.id;
+    const userA = await createUserWithRetry(admin, { email: emailA, password, email_confirm: true });
+    userAId = userA.id;
 
-    const { data: userB, error: userBError } = await admin.auth.admin.createUser({
-      email: emailB,
-      password,
-      email_confirm: true,
-    });
-    if (userBError) throw userBError;
-    userBId = userB.user.id;
+    const userB = await createUserWithRetry(admin, { email: emailB, password, email_confirm: true });
+    userBId = userB.id;
 
     await admin.from("store_users").insert({ store_id: storeAId, user_id: userAId, role: "admin" });
     await admin.from("store_users").insert({ store_id: storeBId, user_id: userBId, role: "admin" });
 
     clientA = createClient(SUPABASE_URL, ANON_KEY, { auth: { autoRefreshToken: false, persistSession: false } });
-    await clientA.auth.signInWithPassword({ email: emailA, password });
+    await signInWithRetry(clientA, emailA, password);
 
     clientB = createClient(SUPABASE_URL, ANON_KEY, { auth: { autoRefreshToken: false, persistSession: false } });
-    await clientB.auth.signInWithPassword({ email: emailB, password });
+    await signInWithRetry(clientB, emailB, password);
 
     anonClient = createClient(SUPABASE_URL, ANON_KEY, { auth: { autoRefreshToken: false, persistSession: false } });
   }, 30000);

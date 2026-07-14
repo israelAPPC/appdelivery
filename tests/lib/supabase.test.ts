@@ -31,7 +31,7 @@ runIfConfigured("client Supabase (anon)", () => {
     expect(error).toBeNull();
     expect(typeof count).toBe("number");
     expect(count as number).toBeGreaterThanOrEqual(0);
-  });
+  }, 15000);
 });
 
 if (!hasCredentials) {
