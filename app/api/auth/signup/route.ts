@@ -127,8 +127,20 @@ export async function POST(request: Request) {
   if (signInError || !signInData?.session) {
     // Rollback: nao deixar usuario de Auth orfao sem loja.
     await serviceRole.auth.admin.deleteUser(newUserId);
+    // DEBUG TEMPORARIO — remover apos diagnosticar a falha intermitente de signIn.
+    console.error("[api/auth/signup] signIn falhou apos createUser", {
+      signInError,
+      hasSignInData: Boolean(signInData),
+    });
     return NextResponse.json(
-      { error: "Nao foi possivel autenticar o usuario recem-criado." },
+      {
+        error: "Nao foi possivel autenticar o usuario recem-criado.",
+        debug: {
+          message: signInError?.message ?? null,
+          status: signInError?.status ?? null,
+          name: signInError?.name ?? null,
+        },
+      },
       { status: 400 },
     );
   }
