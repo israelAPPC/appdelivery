@@ -104,13 +104,27 @@ export async function POST(request: Request) {
   // 2. Autentica como o usuario recem-criado, para que a RPC
   //    `create_store_with_owner` capture o auth.uid() correto (nunca um
   //    user_id vindo do payload do client).
+  //
+  //    `signInWithPassword` logo apos `auth.admin.createUser` pode falhar de
+  //    forma intermitente (sem sessao, sem erro claro) por eventual
+  //    consistencia do backend de Auth do Supabase — mesmo comportamento ja
+  //    documentado em `tests/helpers/sign-in-with-retry.ts`. Retry curto
+  //    evita expor esse gap transitorio como falha definitiva de cadastro.
   const anonClient = createAnonSupabaseClient();
-  const { data: signInData, error: signInError } = await anonClient.auth.signInWithPassword({
-    email,
-    password,
-  });
+  let signInData: Awaited<ReturnType<typeof anonClient.auth.signInWithPassword>>["data"] | null = null;
+  let signInError: Awaited<ReturnType<typeof anonClient.auth.signInWithPassword>>["error"] | null = null;
+  const SIGN_IN_RETRY_ATTEMPTS = 3;
+  for (let attempt = 1; attempt <= SIGN_IN_RETRY_ATTEMPTS; attempt++) {
+    const result = await anonClient.auth.signInWithPassword({ email, password });
+    signInData = result.data;
+    signInError = result.error;
+    if (!signInError && signInData?.session) break;
+    if (attempt < SIGN_IN_RETRY_ATTEMPTS) {
+      await new Promise((resolve) => setTimeout(resolve, 500 * attempt));
+    }
+  }
 
-  if (signInError || !signInData.session) {
+  if (signInError || !signInData?.session) {
     // Rollback: nao deixar usuario de Auth orfao sem loja.
     await serviceRole.auth.admin.deleteUser(newUserId);
     return NextResponse.json(
