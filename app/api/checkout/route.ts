@@ -50,6 +50,28 @@ type CheckoutBody = {
   discount?: unknown;
 };
 
+/**
+ * Resolve a URL base publica do app para montar o `notification_url` da
+ * preferencia de pagamento (Task 4.1 — webhook do Mercado Pago).
+ *
+ * Preferencia: `NEXT_PUBLIC_APP_URL`, se configurada (mais robusto — sempre
+ * a URL canonica de producao, independente de headers de proxy). Se nao
+ * estiver configurada (ex.: dev local sem essa env var), deriva do proprio
+ * request de checkout — funciona tanto em dev quanto na Vercel, que envia
+ * `host`/`x-forwarded-proto` corretos por padrao.
+ */
+function resolveAppBaseUrl(request: Request): string {
+  const configuredUrl = process.env.NEXT_PUBLIC_APP_URL;
+  if (isNonEmptyString(configuredUrl)) {
+    return configuredUrl.replace(/\/+$/, "");
+  }
+
+  const requestUrl = new URL(request.url);
+  const host = request.headers.get("x-forwarded-host") ?? request.headers.get("host") ?? requestUrl.host;
+  const protocol = request.headers.get("x-forwarded-proto") ?? requestUrl.protocol.replace(":", "");
+  return `${protocol}://${host}`;
+}
+
 function isNonEmptyString(value: unknown): value is string {
   return typeof value === "string" && value.trim().length > 0;
 }
@@ -271,6 +293,7 @@ export async function POST(request: Request) {
       accessToken,
       externalReference: order.id,
       items: orderItems.map((item) => ({ title: item.name, quantity: item.quantity, unitPrice: item.unitPrice })),
+      notificationUrl: `${resolveAppBaseUrl(request)}/api/webhooks/mercado-pago?storeId=${storeId}`,
     });
 
     return NextResponse.json({ order, paymentUrl: preference.initPoint }, { status: 201 });

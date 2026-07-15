@@ -68,3 +68,39 @@ export async function createPaymentPreference({
   const data = (await response.json()) as { id: string; init_point: string };
   return { id: data.id, initPoint: data.init_point };
 }
+
+export type MercadoPagoPayment = {
+  id: string;
+  status: string;
+  externalReference: string | null;
+};
+
+/**
+ * Busca um pagamento na API do Mercado Pago usando o `access_token` PROPRIO
+ * da loja (Task 4.1 — webhook de confirmacao de pagamento).
+ *
+ * Este e o mecanismo real de "validacao de autenticidade" do webhook: o
+ * corpo da notificacao recebida do Mercado Pago NUNCA e confiavel por si so
+ * (qualquer um pode enviar um POST para a URL do webhook forjando o payload)
+ * — so quem possui o access_token verdadeiro da loja consegue ler os dados
+ * reais do pagamento aqui. Por isso o chamador (route handler do webhook)
+ * deve usar APENAS `data.id` do corpo recebido para saber qual pagamento
+ * buscar, e usar o resultado desta funcao (nunca o corpo do webhook) para
+ * decidir o que fazer com o pedido.
+ */
+export async function getPayment(accessToken: string, paymentId: string): Promise<MercadoPagoPayment> {
+  const response = await fetch(`https://api.mercadopago.com/v1/payments/${encodeURIComponent(paymentId)}`, {
+    method: "GET",
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+    },
+  });
+
+  if (!response.ok) {
+    const errorBody = await response.text().catch(() => "");
+    throw new Error(`Falha ao buscar pagamento no Mercado Pago (status ${response.status}): ${errorBody}`);
+  }
+
+  const data = (await response.json()) as { id: number | string; status: string; external_reference: string | null };
+  return { id: String(data.id), status: data.status, externalReference: data.external_reference ?? null };
+}

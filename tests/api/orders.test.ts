@@ -16,11 +16,20 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const mockGetSession = vi.fn();
 const mockGetStorePermissions = vi.fn();
 const mockFrom = vi.fn();
+const mockSendOrderStatusNotification = vi.fn();
 
 vi.mock("@/app/lib/auth", () => ({
   getSession: (...args: unknown[]) => mockGetSession(...args),
   getStorePermissions: (...args: unknown[]) => mockGetStorePermissions(...args),
   createAuthedSupabaseClient: () => ({ from: mockFrom }),
+}));
+
+// `sendOrderStatusNotification` (Task 4.3) e mockada aqui: o PATCH so
+// precisa garantir que ela e chamada apos o UPDATE ter sucesso, e que uma
+// falha dela nunca derruba a resposta da rota — o disparo real de push e
+// testado em tests/lib/notifications.test.ts.
+vi.mock("@/app/lib/notifications", () => ({
+  sendOrderStatusNotification: (...args: unknown[]) => mockSendOrderStatusNotification(...args),
 }));
 
 import { GET } from "@/app/api/orders/route";
@@ -162,6 +171,8 @@ describe("PATCH /api/orders/[id]", () => {
     mockGetSession.mockReset();
     mockGetStorePermissions.mockReset();
     mockFrom.mockReset();
+    mockSendOrderStatusNotification.mockReset();
+    mockSendOrderStatusNotification.mockResolvedValue(undefined);
   });
 
   it("401 quando nao ha sessao autenticada", async () => {
@@ -229,6 +240,45 @@ describe("PATCH /api/orders/[id]", () => {
     expect(updateBuilder.update).toHaveBeenCalledWith({ status: "preparo" });
     expect(updateBuilder.eq).toHaveBeenCalledWith("id", ORDER_ID);
     expect(updateBuilder.eq).toHaveBeenCalledWith("store_id", STORE_ID);
+  });
+
+  it("dispara exatamente 1 notificacao de push apos o status ser atualizado com sucesso", async () => {
+    mockGetSession.mockResolvedValue({ user: { id: "user-1" }, accessToken: "token-abc" });
+    mockGetStorePermissions.mockResolvedValue({
+      role: "admin",
+      permissions: { orders: true, catalog: true, financial: true, settings: true },
+    });
+
+    const updatedOrder = { id: ORDER_ID, store_id: STORE_ID, status: "preparo" };
+    mockPatchFlow("recebido", { data: updatedOrder, error: null });
+
+    const response = await PATCH(patchRequest({ status: "preparo", storeId: STORE_ID }), {
+      params: { id: ORDER_ID },
+    });
+
+    expect(response.status).toBe(200);
+    expect(mockSendOrderStatusNotification).toHaveBeenCalledTimes(1);
+    expect(mockSendOrderStatusNotification).toHaveBeenCalledWith(ORDER_ID, "preparo");
+  });
+
+  it("falha no envio da notificacao de push nao derruba a resposta de sucesso do PATCH", async () => {
+    mockGetSession.mockResolvedValue({ user: { id: "user-1" }, accessToken: "token-abc" });
+    mockGetStorePermissions.mockResolvedValue({
+      role: "admin",
+      permissions: { orders: true, catalog: true, financial: true, settings: true },
+    });
+
+    const updatedOrder = { id: ORDER_ID, store_id: STORE_ID, status: "preparo" };
+    mockPatchFlow("recebido", { data: updatedOrder, error: null });
+    mockSendOrderStatusNotification.mockRejectedValue(new Error("push provider indisponivel"));
+
+    const response = await PATCH(patchRequest({ status: "preparo", storeId: STORE_ID }), {
+      params: { id: ORDER_ID },
+    });
+
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as { order: unknown };
+    expect(body.order).toEqual(updatedOrder);
   });
 
   it("409 quando a transicao pula uma etapa (recebido -> concluido) e o status nao muda", async () => {

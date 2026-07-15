@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createAuthedSupabaseClient, getSession, getStorePermissions } from "@/app/lib/auth";
 import { nextOrderStatus, type Order, type OrderStatus } from "@/app/lib/orders";
+import { sendOrderStatusNotification } from "@/app/lib/notifications";
 
 /**
  * PATCH /api/orders/:id
@@ -117,6 +118,16 @@ export async function PATCH(request: Request, { params }: { params: { id: string
   if (!data) {
     return NextResponse.json({ error: "Pedido nao encontrado." }, { status: 404 });
   }
+
+  // Dispara a notificacao de push (Task 4.3) APENAS depois do status ja ter
+  // sido persistido com sucesso acima. Fire-and-forget: uma falha aqui
+  // (subscription expirada, provedor de push indisponivel, etc.) nunca pode
+  // derrubar a resposta de sucesso do PATCH — `sendOrderStatusNotification`
+  // ja captura suas proprias excecoes, mas o `catch` abaixo e uma defesa em
+  // profundidade extra.
+  void sendOrderStatusNotification(orderId, status).catch((error) => {
+    console.error("[api/orders/:id] Falha inesperada ao notificar mudanca de status", { orderId, error });
+  });
 
   return NextResponse.json({ order: data as Order });
 }
