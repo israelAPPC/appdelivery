@@ -128,6 +128,21 @@
   - [ ] Mudança de status dispara 1 notificação (não duplicada) para o cliente do pedido
   - [ ] Falha no provedor de push não derruba a atualização de status do pedido (não bloqueante)
 
+### Fase 6 — Landing page pública + onboarding de lojista
+
+#### Task 6.1 — Landing page (`/`) + fluxo de cadastro da loja
+- Agent: frontend-admin
+- Input: `SPEC.md` (posicionamento B2B, funcionalidades essenciais), `DESIGN.md` (tokens), `POST /api/auth/signup` já existente (cria loja+admin via `create_store_with_owner` e retorna `session`)
+- Output:
+  - `app/page.tsx` — landing B2B para lojistas: Hero (mensalidade fixa, sem taxa por venda vs. iFood/WhatsApp), Funcionalidades essenciais, Como funciona (passos), CTA de cadastro. Só tokens de `DESIGN.md`, dark mode funcionando, sem preços (cobrança da assinatura é decisão em aberto)
+  - `app/(marketing)/cadastro/page.tsx` (ou equivalente) — formulário (nome da loja, e-mail, senha, dados básicos) que faz POST a `/api/auth/signup`, grava `app_delivery_store_id` + `app_delivery_access_token` no `localStorage` e redireciona para `/pedidos`
+  - `app/lib/signup-form.ts` — validação pura do formulário + geração de slug a partir do nome da loja (com testes)
+- Sem cobrança de mensalidade (decisão em aberto mantida). Reaproveita o endpoint de signup existente — não duplica lógica de criação de loja/usuário.
+- Testes críticos:
+  - [ ] Validação rejeita e-mail inválido, senha < 6 e nome de loja vazio (400 antes de chamar a API)
+  - [ ] Slug é gerado em kebab-case, sem acento/caractere especial, a partir do nome da loja
+  - [ ] Cadastro com sucesso persiste token+storeId e redireciona ao painel
+
 ---
 
 ## Sprint 2 — Recursos complementares (avaliações, cupons, relatórios, WhatsApp, comanda avançada)

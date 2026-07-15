@@ -157,6 +157,50 @@ runIfConfigured("rotas de auth (/api/auth/*)", () => {
     expect(badResponse.status).toBe(401);
   }, { retry: 3, timeout: 30000 });
 
+  it("POST /api/auth/login retorna store.id quando o usuario tem loja vinculada", async () => {
+    const email = `login-store-${suffix}@teste-app-delivery.com`;
+    const { body: signupBody } = await requestWithRateLimitRetry<{
+      user: { id: string };
+      store: { id: string };
+    }>(() =>
+      signup(
+        jsonRequest({
+          email,
+          password,
+          store: { name: `Loja Login Store ${suffix}`, slug: `loja-login-store-${suffix}` },
+        }),
+      ),
+    );
+    storeIdsToCleanup.push(signupBody.store.id);
+    userIdsToCleanup.push(signupBody.user.id);
+
+    const { body: loginBody, response: loginResponse } = await requestWithRateLimitRetry<{
+      store?: { id: string };
+    }>(() => login(jsonRequest({ email, password })));
+    expect(loginResponse.status).toBe(200);
+    expect(loginBody.store?.id).toBe(signupBody.store.id);
+  }, { retry: 3, timeout: 30000 });
+
+  it("POST /api/auth/login funciona (sem quebrar) quando o usuario nao tem loja vinculada", async () => {
+    const email = `login-no-store-${suffix}@teste-app-delivery.com`;
+    const admin2: SupabaseClient = createClient(SUPABASE_URL, SERVICE_ROLE_KEY, {
+      auth: { autoRefreshToken: false, persistSession: false },
+    });
+    const { data: created, error: createUserError } = await admin2.auth.admin.createUser({
+      email,
+      password,
+      email_confirm: true,
+    });
+    expect(createUserError).toBeNull();
+    if (created?.user) userIdsToCleanup.push(created.user.id);
+
+    const { body: loginBody, response: loginResponse } = await requestWithRateLimitRetry<{
+      store?: { id: string };
+    }>(() => login(jsonRequest({ email, password })));
+    expect(loginResponse.status).toBe(200);
+    expect(loginBody.store).toBeUndefined();
+  }, { retry: 3, timeout: 30000 });
+
   it("POST /api/auth/invite: admin cadastra ate 3 usuarios, e o 4o e rejeitado com erro claro", async () => {
     const adminEmail = `invite-admin-${suffix}@teste-app-delivery.com`;
     const { body: signupBody } = await requestWithRateLimitRetry<{
