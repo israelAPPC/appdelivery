@@ -75,13 +75,24 @@ runIfConfigured("rotas de auth (/api/auth/*)", () => {
     expect(response.status).toBe(201);
     const body = (await response.json()) as {
       user: { id: string };
-      store: { id: string };
+      store: {
+        id: string;
+        role: string;
+        permissions: { orders: boolean; catalog: boolean; financial: boolean; settings: boolean };
+      };
       session: { access_token: string };
     };
 
     expect(body.user.id).toBeTruthy();
     expect(body.store.id).toBeTruthy();
     expect(body.session.access_token).toBeTruthy();
+    expect(body.store.role).toBe("admin");
+    expect(body.store.permissions).toEqual({
+      orders: true,
+      catalog: true,
+      financial: true,
+      settings: true,
+    });
 
     storeIdsToCleanup.push(body.store.id);
     userIdsToCleanup.push(body.user.id);
@@ -157,7 +168,7 @@ runIfConfigured("rotas de auth (/api/auth/*)", () => {
     expect(badResponse.status).toBe(401);
   }, { retry: 3, timeout: 30000 });
 
-  it("POST /api/auth/login retorna store.id quando o usuario tem loja vinculada", async () => {
+  it("POST /api/auth/login retorna store.id, role e permissions quando o usuario tem loja vinculada", async () => {
     const email = `login-store-${suffix}@teste-app-delivery.com`;
     const { body: signupBody } = await requestWithRateLimitRetry<{
       user: { id: string };
@@ -175,10 +186,23 @@ runIfConfigured("rotas de auth (/api/auth/*)", () => {
     userIdsToCleanup.push(signupBody.user.id);
 
     const { body: loginBody, response: loginResponse } = await requestWithRateLimitRetry<{
-      store?: { id: string };
+      store?: {
+        id: string;
+        role: string;
+        permissions: { orders: boolean; catalog: boolean; financial: boolean; settings: boolean };
+      };
     }>(() => login(jsonRequest({ email, password })));
     expect(loginResponse.status).toBe(200);
     expect(loginBody.store?.id).toBe(signupBody.store.id);
+    // O usuario que fez o cadastro e sempre admin: role e permissions devem
+    // refletir isso na resposta de login (admin tem acesso total).
+    expect(loginBody.store?.role).toBe("admin");
+    expect(loginBody.store?.permissions).toEqual({
+      orders: true,
+      catalog: true,
+      financial: true,
+      settings: true,
+    });
   }, { retry: 3, timeout: 30000 });
 
   it("POST /api/auth/login funciona (sem quebrar) quando o usuario nao tem loja vinculada", async () => {
@@ -319,7 +343,22 @@ runIfConfigured("rotas de auth (/api/auth/*)", () => {
     expect(employeeLoginResponse.status).toBe(200);
     const employeeLoginBody = (await employeeLoginResponse.json()) as {
       session: { access_token: string };
+      store?: {
+        role: string;
+        permissions: { orders: boolean; catalog: boolean; financial: boolean; settings: boolean };
+      };
     };
+
+    // Funcionario com permissions restritas: login deve refletir role
+    // "employee" e exatamente as permissoes concedidas (nunca escaladas para
+    // admin so por estar autenticado).
+    expect(employeeLoginBody.store?.role).toBe("employee");
+    expect(employeeLoginBody.store?.permissions).toEqual({
+      orders: true,
+      catalog: false,
+      financial: false,
+      settings: false,
+    });
 
     // Funcionario tenta convidar outro usuario (acao restrita a admin) — deve ser bloqueado.
     const forbiddenResponse = await invite(

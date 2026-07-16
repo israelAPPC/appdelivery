@@ -1,5 +1,11 @@
 import { NextResponse } from "next/server";
-import { createAnonSupabaseClient, createAuthedSupabaseClient } from "@/app/lib/auth";
+import {
+  createAnonSupabaseClient,
+  createAuthedSupabaseClient,
+  getStorePermissions,
+  type StorePermissions,
+  type StoreRole,
+} from "@/app/lib/auth";
 
 /**
  * POST /api/auth/login
@@ -76,6 +82,17 @@ export async function POST(request: Request) {
     console.error("Erro ao resolver store_users no login:", storeUserError.message);
   }
 
+  let storePayload: { id: string; role: StoreRole; permissions: StorePermissions } | null = null;
+  if (storeUser) {
+    const access = await getStorePermissions(data.user.id, storeUser.store_id, authedClient);
+    storePayload = {
+      id: storeUser.store_id,
+      role: access?.role ?? "employee",
+      permissions:
+        access?.permissions ?? { orders: false, catalog: false, financial: false, settings: false },
+    };
+  }
+
   return NextResponse.json(
     {
       user: { id: data.user.id, email: data.user.email },
@@ -83,7 +100,7 @@ export async function POST(request: Request) {
         access_token: data.session.access_token,
         refresh_token: data.session.refresh_token,
       },
-      ...(storeUser ? { store: { id: storeUser.store_id } } : {}),
+      ...(storePayload ? { store: storePayload } : {}),
     },
     { status: 200 },
   );

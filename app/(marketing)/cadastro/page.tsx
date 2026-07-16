@@ -16,7 +16,11 @@ import { slugifyStoreName, validateSignupForm, type SignupFormErrors } from "@/a
  */
 
 type SignupResponse = {
-  store?: { id: string };
+  store?: {
+    id: string;
+    role: "admin" | "employee";
+    permissions: { orders: boolean; catalog: boolean; financial: boolean; settings: boolean };
+  };
   session?: { access_token: string };
   error?: string;
 };
@@ -64,6 +68,8 @@ export default function CadastroPage() {
 
       window.localStorage.setItem("app_delivery_store_id", body.store.id);
       window.localStorage.setItem("app_delivery_access_token", body.session.access_token);
+      window.localStorage.setItem("app_delivery_role", body.store.role);
+      window.localStorage.setItem("app_delivery_permissions", JSON.stringify(body.store.permissions));
       router.push("/pedidos");
     } catch {
       setSubmitError("Não foi possível criar a loja. Tente novamente.");

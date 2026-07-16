@@ -175,7 +175,11 @@ export async function POST(request: Request) {
   return NextResponse.json(
     {
       user: { id: newUserId, email },
-      store: newStore,
+      store: {
+        ...newStore,
+        role: "admin",
+        permissions: { orders: true, catalog: true, financial: true, settings: true },
+      },
       session: {
         access_token: signInData.session.access_token,
         refresh_token: signInData.session.refresh_token,
