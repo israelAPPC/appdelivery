@@ -21,7 +21,7 @@ type SignupResponse = {
     role: "admin" | "employee";
     permissions: { orders: boolean; catalog: boolean; financial: boolean; settings: boolean };
   };
-  session?: { access_token: string };
+  session?: { access_token: string; refresh_token: string };
   error?: string;
 };
 
@@ -68,6 +68,7 @@ export default function CadastroPage() {
 
       window.localStorage.setItem("app_delivery_store_id", body.store.id);
       window.localStorage.setItem("app_delivery_access_token", body.session.access_token);
+      window.localStorage.setItem("app_delivery_refresh_token", body.session.refresh_token);
       window.localStorage.setItem("app_delivery_role", body.store.role);
       window.localStorage.setItem("app_delivery_permissions", JSON.stringify(body.store.permissions));
       router.push("/pedidos");

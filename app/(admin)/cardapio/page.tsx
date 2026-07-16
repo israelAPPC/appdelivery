@@ -1,6 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { authenticatedFetch } from "@/app/lib/authenticated-fetch";
+import { useAdminSession } from "@/app/lib/admin-session-context";
 
 /**
  * app/(admin)/cardapio/page.tsx
@@ -9,11 +11,8 @@ import { useEffect, useState } from "react";
  * produtos) — CRUD sobre `/api/products` e `/api/products/[id]`, que ja
  * existem e estao testados.
  *
- * Nota de implementacao: como o contexto/hook de sessao autenticada
- * compartilhado do painel admin ainda nao existe, esta pagina le `storeId` e
- * `accessToken` de `localStorage` (chaves `app_delivery_store_id` /
- * `app_delivery_access_token`), seguindo o mesmo padrao ja usado em
- * `app/(admin)/configuracoes/integracoes/page.tsx`.
+ * `storeId`/`accessToken` vem do Context compartilhado do painel
+ * (`useAdminSession`, ver `app/lib/admin-session-context.tsx`).
  */
 
 type Product = {
@@ -45,8 +44,7 @@ const EMPTY_FORM: ProductFormState = {
 };
 
 export default function CardapioPage() {
-  const [storeId, setStoreId] = useState<string | null>(null);
-  const [accessToken, setAccessToken] = useState<string | null>(null);
+  const { storeId, accessToken } = useAdminSession();
   const [products, setProducts] = useState<Product[]>([]);
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
@@ -57,19 +55,12 @@ export default function CardapioPage() {
   const [editForm, setEditForm] = useState<ProductFormState>(EMPTY_FORM);
   const [savingEdit, setSavingEdit] = useState(false);
 
-  useEffect(() => {
-    setStoreId(window.localStorage.getItem("app_delivery_store_id"));
-    setAccessToken(window.localStorage.getItem("app_delivery_access_token"));
-  }, []);
-
   async function loadProducts(currentStoreId: string, token: string) {
     setLoading(true);
     setError(null);
 
     try {
-      const response = await fetch(`/api/products?storeId=${encodeURIComponent(currentStoreId)}`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
+      const response = await authenticatedFetch(`/api/products?storeId=${encodeURIComponent(currentStoreId)}`);
       const body = (await response.json()) as { products?: Product[]; error?: string };
       if (!response.ok) {
         throw new Error(body.error ?? "Nao foi possivel carregar o cardapio.");
@@ -98,12 +89,9 @@ export default function CardapioPage() {
     setMessage(null);
 
     try {
-      const response = await fetch("/api/products", {
+      const response = await authenticatedFetch("/api/products", {
         method: "POST",
-        headers: {
-          "content-type": "application/json",
-          Authorization: `Bearer ${accessToken}`,
-        },
+        headers: { "content-type": "application/json" },
         body: JSON.stringify({
           storeId,
           name: createForm.name,
@@ -157,12 +145,9 @@ export default function CardapioPage() {
     setMessage(null);
 
     try {
-      const response = await fetch(`/api/products/${productId}`, {
+      const response = await authenticatedFetch(`/api/products/${productId}`, {
         method: "PATCH",
-        headers: {
-          "content-type": "application/json",
-          Authorization: `Bearer ${accessToken}`,
-        },
+        headers: { "content-type": "application/json" },
         body: JSON.stringify({
           name: editForm.name,
           price: priceValue,
@@ -194,9 +179,8 @@ export default function CardapioPage() {
     setMessage(null);
 
     try {
-      const response = await fetch(`/api/products/${productId}`, {
+      const response = await authenticatedFetch(`/api/products/${productId}`, {
         method: "DELETE",
-        headers: { Authorization: `Bearer ${accessToken}` },
       });
 
       if (!response.ok) {

@@ -11,6 +11,16 @@ import type { Order } from "@/app/lib/orders";
  *  - pedido de entrega (`delivery`) mostra o endereco.
  */
 
+vi.mock("@/app/lib/admin-session-context", () => ({
+  useAdminSession: () => ({
+    storeId: window.localStorage.getItem("app_delivery_store_id"),
+    accessToken: window.localStorage.getItem("app_delivery_access_token"),
+    role: null,
+    permissions: null,
+    logout: vi.fn(),
+  }),
+}));
+
 const STORE_ID = "22222222-2222-2222-2222-222222222222";
 const ORDER_ID = "order-1";
 

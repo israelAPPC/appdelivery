@@ -1,6 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { authenticatedFetch } from "@/app/lib/authenticated-fetch";
+import { useAdminSession } from "@/app/lib/admin-session-context";
 
 /**
  * app/(admin)/configuracoes/integracoes/page.tsx
@@ -10,13 +12,8 @@ import { useEffect, useState } from "react";
  * caracteres (quando configurada) — o valor completo da chave NUNCA e
  * devolvido pelo backend, entao esta tela nunca pode exibi-lo.
  *
- * Nota de implementacao: como o contexto/hook de sessao autenticada
- * compartilhado do painel admin ainda nao existe (dependente de infra de
- * frontend futura), esta pagina le `storeId` e `accessToken` de
- * `localStorage` (chaves `app_delivery_store_id` / `app_delivery_access_token`),
- * como placeholder ate a Task de auth/layout do painel admin definir o
- * padrao definitivo de sessao no client. A logica de negocio (chamadas a
- * `/api/store/credentials`) e o que importa e ja segue o contrato final.
+ * `storeId`/`accessToken` vem do Context compartilhado do painel
+ * (`useAdminSession`, ver `app/lib/admin-session-context.tsx`).
  */
 
 type CredentialStatus = {
@@ -27,18 +24,12 @@ type CredentialStatus = {
 const PROVIDER = "mercado_pago" as const;
 
 export default function IntegracoesPage() {
-  const [storeId, setStoreId] = useState<string | null>(null);
-  const [accessToken, setAccessToken] = useState<string | null>(null);
+  const { storeId, accessToken } = useAdminSession();
   const [status, setStatus] = useState<CredentialStatus | null>(null);
   const [value, setValue] = useState("");
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    setStoreId(window.localStorage.getItem("app_delivery_store_id"));
-    setAccessToken(window.localStorage.getItem("app_delivery_access_token"));
-  }, []);
 
   useEffect(() => {
     if (!storeId || !accessToken) return;
@@ -47,9 +38,7 @@ export default function IntegracoesPage() {
     setLoading(true);
     setError(null);
 
-    fetch(`/api/store/credentials?storeId=${encodeURIComponent(storeId)}&provider=${PROVIDER}`, {
-      headers: { Authorization: `Bearer ${accessToken}` },
-    })
+    authenticatedFetch(`/api/store/credentials?storeId=${encodeURIComponent(storeId)}&provider=${PROVIDER}`)
       .then(async (response) => {
         if (!response.ok) {
           const body = (await response.json()) as { error?: string };
@@ -81,12 +70,9 @@ export default function IntegracoesPage() {
     setMessage(null);
 
     try {
-      const response = await fetch("/api/store/credentials", {
+      const response = await authenticatedFetch("/api/store/credentials", {
         method: "POST",
-        headers: {
-          "content-type": "application/json",
-          Authorization: `Bearer ${accessToken}`,
-        },
+        headers: { "content-type": "application/json" },
         body: JSON.stringify({ storeId, provider: PROVIDER, value }),
       });
 

@@ -1,6 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { authenticatedFetch } from "@/app/lib/authenticated-fetch";
+import { useAdminSession } from "@/app/lib/admin-session-context";
 
 /**
  * app/(admin)/configuracoes/loja/page.tsx
@@ -11,11 +13,8 @@ import { useEffect, useState } from "react";
  * (contratos ja implementados e testados em `app/api/store/route.ts` e
  * `app/api/store/logo/route.ts`).
  *
- * Nota de implementacao: como o contexto/hook de sessao autenticada
- * compartilhado do painel admin ainda nao existe, esta pagina le `storeId`
- * e `accessToken` de `localStorage` (chaves `app_delivery_store_id` /
- * `app_delivery_access_token`), mesmo padrao provisorio usado em
- * `app/(admin)/configuracoes/integracoes/page.tsx`.
+ * `storeId`/`accessToken` vem do Context compartilhado do painel
+ * (`useAdminSession`, ver `app/lib/admin-session-context.tsx`).
  *
  * `opening_hours` e um JSON livre no schema (`stores.opening_hours jsonb`,
  * "formato JSON livre, refinado em tasks futuras") — em vez de um editor
@@ -114,8 +113,7 @@ function validateForm(form: FormState): string | null {
 }
 
 export default function ConfiguracoesLojaPage() {
-  const [storeId, setStoreId] = useState<string | null>(null);
-  const [accessToken, setAccessToken] = useState<string | null>(null);
+  const { storeId, accessToken } = useAdminSession();
   const [store, setStore] = useState<Store | null>(null);
   const [form, setForm] = useState<FormState | null>(null);
   const [loading, setLoading] = useState(false);
@@ -125,20 +123,13 @@ export default function ConfiguracoesLojaPage() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    setStoreId(window.localStorage.getItem("app_delivery_store_id"));
-    setAccessToken(window.localStorage.getItem("app_delivery_access_token"));
-  }, []);
-
-  useEffect(() => {
     if (!storeId || !accessToken) return;
 
     let cancelled = false;
     setLoading(true);
     setError(null);
 
-    fetch(`/api/store?storeId=${encodeURIComponent(storeId)}`, {
-      headers: { Authorization: `Bearer ${accessToken}` },
-    })
+    authenticatedFetch(`/api/store?storeId=${encodeURIComponent(storeId)}`)
       .then(async (response) => {
         const body = (await response.json()) as { store?: Store; error?: string };
         if (!response.ok) {
@@ -182,12 +173,9 @@ export default function ConfiguracoesLojaPage() {
 
     setSaving(true);
     try {
-      const response = await fetch("/api/store", {
+      const response = await authenticatedFetch("/api/store", {
         method: "PATCH",
-        headers: {
-          "content-type": "application/json",
-          Authorization: `Bearer ${accessToken}`,
-        },
+        headers: { "content-type": "application/json" },
         body: JSON.stringify({
           storeId,
           name: form.name,
@@ -234,9 +222,8 @@ export default function ConfiguracoesLojaPage() {
       formData.append("storeId", storeId);
       formData.append("file", file);
 
-      const response = await fetch("/api/store/logo", {
+      const response = await authenticatedFetch("/api/store/logo", {
         method: "POST",
-        headers: { Authorization: `Bearer ${accessToken}` },
         body: formData,
       });
 

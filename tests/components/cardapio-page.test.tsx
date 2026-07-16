@@ -9,6 +9,16 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
  *  - mostra erro quando a API retorna erro (role="alert").
  */
 
+vi.mock("@/app/lib/admin-session-context", () => ({
+  useAdminSession: () => ({
+    storeId: window.localStorage.getItem("app_delivery_store_id"),
+    accessToken: window.localStorage.getItem("app_delivery_access_token"),
+    role: null,
+    permissions: null,
+    logout: vi.fn(),
+  }),
+}));
+
 const STORE_ID = "11111111-1111-1111-1111-111111111111";
 
 type Product = {

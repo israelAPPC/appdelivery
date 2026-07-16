@@ -1,6 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { authenticatedFetch } from "@/app/lib/authenticated-fetch";
+import { useAdminSession } from "@/app/lib/admin-session-context";
 
 /**
  * app/(admin)/financeiro/page.tsx
@@ -11,9 +13,8 @@ import { useEffect, useState } from "react";
  * supabase/migrations/0009_orders.sql). Consome `/api/reports/sales`, que ja
  * filtra apenas pedidos com `payment_status = 'paid'`.
  *
- * Mesmo padrao de sessao das demais paginas do painel (placeholder ate a
- * infra de auth/layout do admin definir o padrao definitivo): storeId e
- * accessToken lidos de `localStorage`.
+ * `storeId`/`accessToken` vem do Context compartilhado do painel
+ * (`useAdminSession`, ver `app/lib/admin-session-context.tsx`).
  */
 
 type SalesReport = {
@@ -35,19 +36,13 @@ function formatCurrency(value: number): string {
 }
 
 export default function FinanceiroPage() {
-  const [storeId, setStoreId] = useState<string | null>(null);
-  const [accessToken, setAccessToken] = useState<string | null>(null);
+  const { storeId, accessToken } = useAdminSession();
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
   const [paymentMethod, setPaymentMethod] = useState<"" | "mp_online" | "on_delivery">("");
   const [report, setReport] = useState<SalesReport | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    setStoreId(window.localStorage.getItem("app_delivery_store_id"));
-    setAccessToken(window.localStorage.getItem("app_delivery_access_token"));
-  }, []);
 
   useEffect(() => {
     if (!storeId || !accessToken) return;
@@ -61,9 +56,7 @@ export default function FinanceiroPage() {
     if (to) params.set("to", new Date(to).toISOString());
     if (paymentMethod) params.set("paymentMethod", paymentMethod);
 
-    fetch(`/api/reports/sales?${params.toString()}`, {
-      headers: { Authorization: `Bearer ${accessToken}` },
-    })
+    authenticatedFetch(`/api/reports/sales?${params.toString()}`)
       .then(async (response) => {
         if (!response.ok) {
           const body = (await response.json()) as { error?: string };

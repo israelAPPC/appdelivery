@@ -19,7 +19,7 @@ import Link from "next/link";
  */
 
 type LoginResponse = {
-  session?: { access_token: string };
+  session?: { access_token: string; refresh_token: string };
   store?: {
     id: string;
     role: "admin" | "employee";
@@ -55,6 +55,7 @@ export default function LoginPage() {
       }
 
       window.localStorage.setItem("app_delivery_access_token", body.session.access_token);
+      window.localStorage.setItem("app_delivery_refresh_token", body.session.refresh_token);
       if (body.store?.id) {
         window.localStorage.setItem("app_delivery_store_id", body.store.id);
         window.localStorage.setItem("app_delivery_role", body.store.role);

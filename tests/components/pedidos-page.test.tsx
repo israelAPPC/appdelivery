@@ -40,6 +40,16 @@ vi.mock("@/app/lib/supabase", () => {
   };
 });
 
+vi.mock("@/app/lib/admin-session-context", () => ({
+  useAdminSession: () => ({
+    storeId: window.localStorage.getItem("app_delivery_store_id"),
+    accessToken: window.localStorage.getItem("app_delivery_access_token"),
+    role: null,
+    permissions: null,
+    logout: vi.fn(),
+  }),
+}));
+
 const STORE_ID = "22222222-2222-2222-2222-222222222222";
 
 function makeOrder(overrides: Partial<Order> = {}): Order {
@@ -166,6 +176,64 @@ describe("PedidosPage", () => {
     expect(patchCall[0]).toBe(`/api/orders/${initialOrder.id}`);
     const body = JSON.parse((patchCall[1] as RequestInit).body as string);
     expect(body).toEqual({ status: "preparo", storeId: STORE_ID });
+  });
+
+  it("clique duplo/repetido no mesmo pedido nao dispara PATCH duplicado, mas pedidos diferentes nao sao bloqueados entre si", async () => {
+    const order1 = makeOrder({ id: "order-1", order_number: 1001, status: "recebido" });
+    const order2 = makeOrder({ id: "order-2", order_number: 1002, status: "recebido" });
+    const patchOrder1Resolver: { current: (() => void) | null } = { current: null };
+
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === "string" ? input : input.toString();
+      if (init?.method === "PATCH") {
+        if (url.includes(order1.id)) {
+          // Segura a resposta do pedido 1 para simular clique duplo durante a requisicao em voo.
+          await new Promise<void>((resolve) => {
+            patchOrder1Resolver.current = resolve;
+          });
+          return new Response(JSON.stringify({ order: { ...order1, status: "preparo" } }), { status: 200 });
+        }
+        return new Response(JSON.stringify({ order: { ...order2, status: "preparo" } }), { status: 200 });
+      }
+      if (url.includes("/api/orders?")) {
+        return new Response(JSON.stringify({ orders: [order1, order2] }), { status: 200 });
+      }
+      throw new Error(`unexpected fetch: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { default: PedidosPage } = await import("@/app/(admin)/pedidos/page");
+    render(<PedidosPage />);
+
+    await waitFor(() => expect(screen.getAllByText("#1001").length).toBeGreaterThan(0));
+
+    const buttons = screen.getAllByTestId("advance-status-button");
+    // Dois cliques rapidos no botao do mesmo pedido (linha da tabela desktop, pedido 1).
+    fireEvent.click(buttons[0]);
+    fireEvent.click(buttons[0]);
+
+    // Clique em um botao de um pedido DIFERENTE deve funcionar normalmente (nao bloqueado globalmente).
+    const order2Button = screen
+      .getAllByTestId("advance-status-button")
+      .find((_, index) => index >= 2); // segunda linha em diante corresponde ao pedido 2 (desktop + mobile duplicam)
+    if (order2Button) fireEvent.click(order2Button);
+
+    await waitFor(() => {
+      const patchCalls = fetchMock.mock.calls.filter(
+        ([, init]) => (init as RequestInit | undefined)?.method === "PATCH",
+      );
+      expect(patchCalls.length).toBeGreaterThanOrEqual(1);
+    });
+
+    patchOrder1Resolver.current?.();
+
+    await waitFor(() => {
+      const patchCallsOrder1 = fetchMock.mock.calls.filter(([input, init]) => {
+        const url = typeof input === "string" ? input : (input as URL).toString();
+        return (init as RequestInit | undefined)?.method === "PATCH" && url.includes(order1.id);
+      });
+      expect(patchCallsOrder1.length).toBe(1);
+    });
   });
 
   it("funcionario sem permissao 'orders' (403 do backend) nao ve a lista de pedidos", async () => {

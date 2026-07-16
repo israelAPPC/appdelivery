@@ -2,6 +2,8 @@
 
 import { useEffect, useState } from "react";
 import { PAYMENT_STATUS_LABEL, type Order } from "@/app/lib/orders";
+import { authenticatedFetch } from "@/app/lib/authenticated-fetch";
+import { useAdminSession } from "@/app/lib/admin-session-context";
 
 /**
  * app/(admin)/pedidos/[id]/imprimir/page.tsx
@@ -22,10 +24,9 @@ import { PAYMENT_STATUS_LABEL, type Order } from "@/app/lib/orders";
  * de pedido unico — apenas `GET /api/orders?storeId=` (lista) e
  * `PATCH /api/orders/:id`. Por isso esta pagina reaproveita a rota de lista
  * (ja filtrada por `store_id`/RLS) e localiza o pedido pelo `id` da URL, e
- * `GET /api/store?storeId=` para o nome da loja. A sessao (`storeId`/
- * `accessToken`) segue o mesmo padrao provisorio de
- * `app/(admin)/configuracoes/integracoes/page.tsx`, via `localStorage`, ate a
- * task de auth/layout do painel definir o padrao definitivo.
+ * `GET /api/store?storeId=` para o nome da loja. `storeId`/`accessToken`
+ * vem do Context compartilhado do painel (`useAdminSession`, ver
+ * `app/lib/admin-session-context.tsx`).
  */
 
 function formatCurrency(value: number): string {
@@ -51,17 +52,11 @@ function paymentLabel(order: Order): string {
 export default function ImprimirComandaPage({ params }: { params: { id: string } }) {
   const orderId = params.id;
 
-  const [storeId, setStoreId] = useState<string | null>(null);
-  const [accessToken, setAccessToken] = useState<string | null>(null);
+  const { storeId, accessToken } = useAdminSession();
   const [storeName, setStoreName] = useState<string | null>(null);
   const [order, setOrder] = useState<Order | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    setStoreId(window.localStorage.getItem("app_delivery_store_id"));
-    setAccessToken(window.localStorage.getItem("app_delivery_access_token"));
-  }, []);
 
   useEffect(() => {
     if (!storeId || !accessToken) return;
@@ -71,12 +66,8 @@ export default function ImprimirComandaPage({ params }: { params: { id: string }
     setError(null);
 
     Promise.all([
-      fetch(`/api/store?storeId=${encodeURIComponent(storeId)}`, {
-        headers: { Authorization: `Bearer ${accessToken}` },
-      }),
-      fetch(`/api/orders?storeId=${encodeURIComponent(storeId)}`, {
-        headers: { Authorization: `Bearer ${accessToken}` },
-      }),
+      authenticatedFetch(`/api/store?storeId=${encodeURIComponent(storeId)}`),
+      authenticatedFetch(`/api/orders?storeId=${encodeURIComponent(storeId)}`),
     ])
       .then(async ([storeResponse, ordersResponse]) => {
         if (!storeResponse.ok) {

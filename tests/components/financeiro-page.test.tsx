@@ -9,6 +9,16 @@ import { render, screen, waitFor } from "@testing-library/react";
  * rede/Supabase.
  */
 
+vi.mock("@/app/lib/admin-session-context", () => ({
+  useAdminSession: () => ({
+    storeId: window.localStorage.getItem("app_delivery_store_id"),
+    accessToken: window.localStorage.getItem("app_delivery_access_token"),
+    role: null,
+    permissions: null,
+    logout: vi.fn(),
+  }),
+}));
+
 const STORE_ID = "33333333-3333-3333-3333-333333333333";
 
 describe("FinanceiroPage", () => {

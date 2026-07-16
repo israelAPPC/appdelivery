@@ -3,6 +3,8 @@
 import { useEffect, useMemo, useState } from "react";
 import type { RealtimePostgresChangesPayload } from "@supabase/supabase-js";
 import { supabase } from "@/app/lib/supabase";
+import { authenticatedFetch } from "@/app/lib/authenticated-fetch";
+import { useAdminSession } from "@/app/lib/admin-session-context";
 import {
   applyOrderRealtimeEvent,
   nextOrderStatus,
@@ -23,11 +25,9 @@ import {
  * (nunca cross-tenant) — nenhuma mudanca de pedido depende de reload de
  * pagina.
  *
- * Nota de implementacao: como o contexto/hook de sessao autenticada
- * compartilhado do painel admin ainda nao existe, esta pagina le `storeId`
- * e `accessToken` de `localStorage` (mesmo padrao placeholder usado em
- * `app/(admin)/configuracoes/integracoes/page.tsx`), ate a task de
- * auth/layout do painel definir o padrao definitivo de sessao no client.
+ * `storeId`/`accessToken` vem do Context compartilhado do painel
+ * (`useAdminSession`, ver `app/lib/admin-session-context.tsx`), em vez de
+ * cada pagina ler `localStorage` individualmente.
  */
 
 const TOKEN_COLOR_CLASS: Record<"success" | "danger" | "muted", string> = {
@@ -47,17 +47,12 @@ function formatAddress(order: Order): string | null {
 }
 
 export default function PedidosPage() {
-  const [storeId, setStoreId] = useState<string | null>(null);
-  const [accessToken, setAccessToken] = useState<string | null>(null);
+  const { storeId, accessToken } = useAdminSession();
   const [orders, setOrders] = useState<Order[]>([]);
   const [loading, setLoading] = useState(false);
   const [forbidden, setForbidden] = useState(false);
   const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    setStoreId(window.localStorage.getItem("app_delivery_store_id"));
-    setAccessToken(window.localStorage.getItem("app_delivery_access_token"));
-  }, []);
+  const [pendingActionOrderIds, setPendingActionOrderIds] = useState<Set<string>>(new Set());
 
   // Carrega a lista inicial de pedidos (respeita permissao `orders` no backend).
   useEffect(() => {
@@ -68,9 +63,7 @@ export default function PedidosPage() {
     setError(null);
     setForbidden(false);
 
-    fetch(`/api/orders?storeId=${encodeURIComponent(storeId)}`, {
-      headers: { Authorization: `Bearer ${accessToken}` },
-    })
+    authenticatedFetch(`/api/orders?storeId=${encodeURIComponent(storeId)}`)
       .then(async (response) => {
         if (response.status === 403) {
           if (!cancelled) setForbidden(true);
@@ -128,6 +121,9 @@ export default function PedidosPage() {
   async function handleAdvanceStatus(order: Order) {
     const next = nextOrderStatus(order.status);
     if (!next || !storeId || !accessToken) return;
+    if (pendingActionOrderIds.has(order.id)) return;
+
+    setPendingActionOrderIds((current) => new Set(current).add(order.id));
 
     const previousOrders = orders;
     setOrders((current) =>
@@ -135,12 +131,9 @@ export default function PedidosPage() {
     );
 
     try {
-      const response = await fetch(`/api/orders/${order.id}`, {
+      const response = await authenticatedFetch(`/api/orders/${order.id}`, {
         method: "PATCH",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${accessToken}`,
-        },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ status: next, storeId }),
       });
 
@@ -152,6 +145,12 @@ export default function PedidosPage() {
     } catch {
       setOrders(previousOrders);
       setError("Nao foi possivel atualizar o status do pedido.");
+    } finally {
+      setPendingActionOrderIds((current) => {
+        const next = new Set(current);
+        next.delete(order.id);
+        return next;
+      });
     }
   }
 
@@ -161,6 +160,9 @@ export default function PedidosPage() {
   // webhook do Mercado Pago (backend rejeita com 400 se tentado por aqui).
   async function handleMarkAsPaid(order: Order) {
     if (!storeId || !accessToken) return;
+    if (pendingActionOrderIds.has(order.id)) return;
+
+    setPendingActionOrderIds((current) => new Set(current).add(order.id));
 
     const previousOrders = orders;
     setOrders((current) =>
@@ -168,12 +170,9 @@ export default function PedidosPage() {
     );
 
     try {
-      const response = await fetch(`/api/orders/${order.id}`, {
+      const response = await authenticatedFetch(`/api/orders/${order.id}`, {
         method: "PATCH",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${accessToken}`,
-        },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ markAsPaid: true, storeId }),
       });
 
@@ -185,6 +184,12 @@ export default function PedidosPage() {
     } catch {
       setOrders(previousOrders);
       setError("Nao foi possivel marcar o pedido como pago.");
+    } finally {
+      setPendingActionOrderIds((current) => {
+        const next = new Set(current);
+        next.delete(order.id);
+        return next;
+      });
     }
   }
 
@@ -274,9 +279,10 @@ export default function PedidosPage() {
                                 type="button"
                                 data-testid="advance-status-button"
                                 onClick={() => handleAdvanceStatus(order)}
-                                className="rounded-lg bg-accent px-3 py-1.5 text-xs font-medium text-background hover:opacity-90"
+                                disabled={pendingActionOrderIds.has(order.id)}
+                                className="rounded-lg bg-accent px-3 py-1.5 text-xs font-medium text-background hover:opacity-90 disabled:opacity-50"
                               >
-                                Avançar status
+                                {pendingActionOrderIds.has(order.id) ? "Avançando..." : "Avançar status"}
                               </button>
                             )}
                             {canMarkAsPaid && (
@@ -284,9 +290,10 @@ export default function PedidosPage() {
                                 type="button"
                                 data-testid="mark-as-paid-button"
                                 onClick={() => handleMarkAsPaid(order)}
-                                className="rounded-lg bg-success px-3 py-1.5 text-xs font-medium text-background hover:opacity-90"
+                                disabled={pendingActionOrderIds.has(order.id)}
+                                className="rounded-lg bg-success px-3 py-1.5 text-xs font-medium text-background hover:opacity-90 disabled:opacity-50"
                               >
-                                Marcar como pago
+                                {pendingActionOrderIds.has(order.id) ? "Marcando..." : "Marcar como pago"}
                               </button>
                             )}
                           </div>
@@ -333,9 +340,10 @@ export default function PedidosPage() {
                         type="button"
                         data-testid="advance-status-button"
                         onClick={() => handleAdvanceStatus(order)}
-                        className="mt-3 w-full rounded-lg bg-accent px-3 py-2 text-sm font-medium text-background hover:opacity-90"
+                        disabled={pendingActionOrderIds.has(order.id)}
+                        className="mt-3 w-full rounded-lg bg-accent px-3 py-2 text-sm font-medium text-background hover:opacity-90 disabled:opacity-50"
                       >
-                        Avançar status
+                        {pendingActionOrderIds.has(order.id) ? "Avançando..." : "Avançar status"}
                       </button>
                     )}
                     {canMarkAsPaid && (
@@ -343,9 +351,10 @@ export default function PedidosPage() {
                         type="button"
                         data-testid="mark-as-paid-button"
                         onClick={() => handleMarkAsPaid(order)}
-                        className="mt-2 w-full rounded-lg bg-success px-3 py-2 text-sm font-medium text-background hover:opacity-90"
+                        disabled={pendingActionOrderIds.has(order.id)}
+                        className="mt-2 w-full rounded-lg bg-success px-3 py-2 text-sm font-medium text-background hover:opacity-90 disabled:opacity-50"
                       >
-                        Marcar como pago
+                        {pendingActionOrderIds.has(order.id) ? "Marcando..." : "Marcar como pago"}
                       </button>
                     )}
                   </div>
