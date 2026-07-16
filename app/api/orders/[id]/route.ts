@@ -7,7 +7,9 @@ import { sendOrderStatusNotification } from "@/app/lib/notifications";
  * PATCH /api/orders/:id
  *
  * Avanca o status operacional de um pedido (recebido -> preparo -> entrega ->
- * concluido) a partir do painel de pedidos (Task 3.3).
+ * concluido) a partir do painel de pedidos (Task 3.3), e/ou marca um pedido
+ * `on_delivery` como pago manualmente (`markAsPaid: true`) quando o lojista
+ * recebe o pagamento em maos na entrega/retirada.
  *
  * Regras (CLAUDE.md / regras/seguranca.md / convencoes-gerais.md):
  *  - Exige sessao (401) e permissao `orders` (admin sempre pode) checada no
@@ -23,6 +25,20 @@ import { sendOrderStatusNotification } from "@/app/lib/notifications";
  *    for exatamente `nextOrderStatus(statusAtual)` (reusa a mesma funcao
  *    pura usada pela UI, sem duplicar a regra). Pular etapa, retroceder ou
  *    tentar avancar um pedido ja `concluido` retorna 409 Conflict.
+ *  - `markAsPaid: true` (marcar pagamento na entrega/retirada como recebido):
+ *    - So e aceito para pedidos `payment_method === 'on_delivery'`. Pedido
+ *      `mp_online` NUNCA pode ser marcado como pago manualmente por esta
+ *      rota — retorna 400 — pois isso violaria a regra de seguranca.md de
+ *      que so o webhook do Mercado Pago (validado/assinado) pode confirmar
+ *      pagamento online (ver app/api/webhooks/mercado-pago/route.ts, nao
+ *      alterado por esta rota).
+ *    - So tem efeito quando `payment_status` atual e `'pending_offline'`. Se
+ *      o pedido ja estiver `'paid'`, e idempotente: retorna 200 sem gerar
+ *      novo efeito colateral (nao e erro chamar de novo). Qualquer outro
+ *      `payment_status` atual (`'pending'`, `'failed'`) e rejeitado com 400,
+ *      pois esses estados so devem ser resolvidos pelo webhook do MP.
+ *    - Nunca existe acao de reverter/"despagar" nesta rota.
+ *    - Pode vir sozinho ou junto com `status` na mesma requisicao.
  */
 
 const VALID_ORDER_STATUSES: OrderStatus[] = ["recebido", "preparo", "entrega", "concluido"];
@@ -48,14 +64,31 @@ export async function PATCH(request: Request, { params }: { params: { id: string
     return NextResponse.json({ error: "Corpo da requisicao invalido." }, { status: 400 });
   }
 
-  const { status, storeId } = (body ?? {}) as { status?: unknown; storeId?: unknown };
+  const { status, storeId, markAsPaid } = (body ?? {}) as {
+    status?: unknown;
+    storeId?: unknown;
+    markAsPaid?: unknown;
+  };
 
   if (!isNonEmptyString(storeId)) {
     return NextResponse.json({ error: "Parametro 'storeId' e obrigatorio." }, { status: 400 });
   }
 
-  if (!isValidOrderStatus(status)) {
+  const shouldMarkAsPaid = markAsPaid === true;
+
+  // `status` so e validado/aplicado se foi de fato informado no body — isso
+  // permite chamar o PATCH so para `markAsPaid`, sem exigir uma transicao de
+  // status operacional na mesma requisicao.
+  const hasStatusInBody = status !== undefined;
+  if (hasStatusInBody && !isValidOrderStatus(status)) {
     return NextResponse.json({ error: "Status de pedido invalido." }, { status: 400 });
+  }
+
+  if (!hasStatusInBody && !shouldMarkAsPaid) {
+    return NextResponse.json(
+      { error: "Informe 'status' e/ou 'markAsPaid' para atualizar o pedido." },
+      { status: 400 },
+    );
   }
 
   const session = await getSession(request);
@@ -74,7 +107,7 @@ export async function PATCH(request: Request, { params }: { params: { id: string
 
   const { data: currentOrder, error: fetchError } = await authedClient
     .from("orders")
-    .select("id, status")
+    .select("id, status, payment_method, payment_status")
     .eq("id", orderId)
     .eq("store_id", storeId)
     .single();
@@ -92,17 +125,77 @@ export async function PATCH(request: Request, { params }: { params: { id: string
     return NextResponse.json({ error: "Pedido nao encontrado." }, { status: 404 });
   }
 
-  const expectedNextStatus = nextOrderStatus((currentOrder as { status: OrderStatus }).status);
-  if (expectedNextStatus !== status) {
-    return NextResponse.json(
-      { error: "Transicao de status invalida para este pedido." },
-      { status: 409 },
-    );
+  const current = currentOrder as {
+    status: OrderStatus;
+    payment_method: Order["payment_method"];
+    payment_status: Order["payment_status"];
+  };
+
+  if (hasStatusInBody) {
+    const expectedNextStatus = nextOrderStatus(current.status);
+    if (expectedNextStatus !== status) {
+      return NextResponse.json(
+        { error: "Transicao de status invalida para este pedido." },
+        { status: 409 },
+      );
+    }
+  }
+
+  // `markAsPaid`: valida as regras de negocio ANTES de tocar no banco (ver
+  // comentario no topo do arquivo). Nunca permite marcar pedido `mp_online`
+  // como pago por aqui — so o webhook do Mercado Pago pode.
+  let shouldPersistPaid = false;
+  if (shouldMarkAsPaid) {
+    if (current.payment_method !== "on_delivery") {
+      return NextResponse.json(
+        {
+          error:
+            "Pedidos com pagamento online (Mercado Pago) so podem ser marcados como pagos pelo webhook.",
+        },
+        { status: 400 },
+      );
+    }
+
+    if (current.payment_status === "paid") {
+      // Idempotente: ja esta pago, nao gera novo efeito colateral.
+      shouldPersistPaid = false;
+    } else if (current.payment_status === "pending_offline") {
+      shouldPersistPaid = true;
+    } else {
+      return NextResponse.json(
+        { error: "Este pedido nao pode ser marcado como pago manualmente." },
+        { status: 400 },
+      );
+    }
+  }
+
+  const updatePayload: { status?: OrderStatus; payment_status?: "paid" } = {};
+  if (hasStatusInBody) updatePayload.status = status;
+  if (shouldPersistPaid) updatePayload.payment_status = "paid";
+
+  // Nada a persistir (ex.: markAsPaid idempotente e nenhum status informado):
+  // retorna o pedido atual sem chamar UPDATE, evitando efeito colateral
+  // desnecessario (ex.: reenviar notificacao de push).
+  if (Object.keys(updatePayload).length === 0) {
+    const { data: unchangedOrder, error: refetchError } = await authedClient
+      .from("orders")
+      .select(
+        "id, store_id, order_number, customer_name, customer_phone, delivery_address, items, subtotal, shipping_cost, discount, total, payment_method, payment_status, fulfillment_type, status, created_at",
+      )
+      .eq("id", orderId)
+      .eq("store_id", storeId)
+      .single();
+
+    if (refetchError || !unchangedOrder) {
+      return NextResponse.json({ error: "Nao foi possivel atualizar o pedido." }, { status: 500 });
+    }
+
+    return NextResponse.json({ order: unchangedOrder as Order });
   }
 
   const { data, error } = await authedClient
     .from("orders")
-    .update({ status })
+    .update(updatePayload)
     .eq("id", orderId)
     .eq("store_id", storeId)
     .select(
@@ -125,9 +218,11 @@ export async function PATCH(request: Request, { params }: { params: { id: string
   // derrubar a resposta de sucesso do PATCH — `sendOrderStatusNotification`
   // ja captura suas proprias excecoes, mas o `catch` abaixo e uma defesa em
   // profundidade extra.
-  void sendOrderStatusNotification(orderId, status).catch((error) => {
-    console.error("[api/orders/:id] Falha inesperada ao notificar mudanca de status", { orderId, error });
-  });
+  if (hasStatusInBody) {
+    void sendOrderStatusNotification(orderId, status).catch((error) => {
+      console.error("[api/orders/:id] Falha inesperada ao notificar mudanca de status", { orderId, error });
+    });
+  }
 
   return NextResponse.json({ order: data as Order });
 }

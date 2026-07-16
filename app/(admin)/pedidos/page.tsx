@@ -155,6 +155,39 @@ export default function PedidosPage() {
     }
   }
 
+  // Marca um pedido `on_delivery` (pagar na entrega/retirada) como pago,
+  // depois que o lojista recebe o dinheiro/pix em maos. Nunca disponivel
+  // para pedidos `mp_online` — esses so mudam de status de pagamento via
+  // webhook do Mercado Pago (backend rejeita com 400 se tentado por aqui).
+  async function handleMarkAsPaid(order: Order) {
+    if (!storeId || !accessToken) return;
+
+    const previousOrders = orders;
+    setOrders((current) =>
+      current.map((item) => (item.id === order.id ? { ...item, payment_status: "paid" } : item)),
+    );
+
+    try {
+      const response = await fetch(`/api/orders/${order.id}`, {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${accessToken}`,
+        },
+        body: JSON.stringify({ markAsPaid: true, storeId }),
+      });
+
+      if (!response.ok) {
+        setOrders(previousOrders);
+        const body = (await response.json()) as { error?: string };
+        setError(body.error ?? "Nao foi possivel marcar o pedido como pago.");
+      }
+    } catch {
+      setOrders(previousOrders);
+      setError("Nao foi possivel marcar o pedido como pago.");
+    }
+  }
+
   if (!storeId || !accessToken) {
     return (
       <main className="min-h-screen bg-background px-4 py-8 sm:px-6 lg:px-8">
@@ -214,6 +247,8 @@ export default function PedidosPage() {
                 <tbody>
                   {orders.map((order) => {
                     const next = nextOrderStatus(order.status);
+                    const canMarkAsPaid =
+                      order.payment_method === "on_delivery" && order.payment_status === "pending_offline";
                     return (
                       <tr key={order.id} data-testid="order-row" className="border-b border-border last:border-0">
                         <td className="px-4 py-3 font-medium text-foreground">#{order.order_number}</td>
@@ -233,16 +268,28 @@ export default function PedidosPage() {
                         </td>
                         <td className="px-4 py-3 text-foreground">{formatCurrency(order.total)}</td>
                         <td className="px-4 py-3">
-                          {next && (
-                            <button
-                              type="button"
-                              data-testid="advance-status-button"
-                              onClick={() => handleAdvanceStatus(order)}
-                              className="rounded-lg bg-accent px-3 py-1.5 text-xs font-medium text-background hover:opacity-90"
-                            >
-                              Avançar status
-                            </button>
-                          )}
+                          <div className="flex flex-wrap gap-2">
+                            {next && (
+                              <button
+                                type="button"
+                                data-testid="advance-status-button"
+                                onClick={() => handleAdvanceStatus(order)}
+                                className="rounded-lg bg-accent px-3 py-1.5 text-xs font-medium text-background hover:opacity-90"
+                              >
+                                Avançar status
+                              </button>
+                            )}
+                            {canMarkAsPaid && (
+                              <button
+                                type="button"
+                                data-testid="mark-as-paid-button"
+                                onClick={() => handleMarkAsPaid(order)}
+                                className="rounded-lg bg-success px-3 py-1.5 text-xs font-medium text-background hover:opacity-90"
+                              >
+                                Marcar como pago
+                              </button>
+                            )}
+                          </div>
                         </td>
                       </tr>
                     );
@@ -255,6 +302,8 @@ export default function PedidosPage() {
             <div className="space-y-3 sm:hidden">
               {orders.map((order) => {
                 const next = nextOrderStatus(order.status);
+                const canMarkAsPaid =
+                  order.payment_method === "on_delivery" && order.payment_status === "pending_offline";
                 return (
                   <div
                     key={order.id}
@@ -287,6 +336,16 @@ export default function PedidosPage() {
                         className="mt-3 w-full rounded-lg bg-accent px-3 py-2 text-sm font-medium text-background hover:opacity-90"
                       >
                         Avançar status
+                      </button>
+                    )}
+                    {canMarkAsPaid && (
+                      <button
+                        type="button"
+                        data-testid="mark-as-paid-button"
+                        onClick={() => handleMarkAsPaid(order)}
+                        className="mt-2 w-full rounded-lg bg-success px-3 py-2 text-sm font-medium text-background hover:opacity-90"
+                      >
+                        Marcar como pago
                       </button>
                     )}
                   </div>

@@ -139,6 +139,7 @@ runIfConfigured("POST /api/checkout", () => {
   afterAll(async () => {
     for (const id of storeIdsToCleanup) {
       await admin.from("orders").delete().eq("store_id", id);
+      await admin.from("coupons").delete().eq("store_id", id);
       await admin.from("store_credentials").delete().eq("store_id", id);
       await admin.from("products").delete().eq("store_id", id);
       await admin.from("store_users").delete().eq("store_id", id);
@@ -382,6 +383,157 @@ runIfConfigured("POST /api/checkout", () => {
     expect(body.error).toBeTruthy();
 
     const { data } = await admin.from("orders").select("id").eq("customer_phone", "11999990008");
+    expect(data).toHaveLength(0);
+  }, { retry: 3, timeout: 30000 });
+
+  // ---------------------------------------------------------------------
+  // Cupons (Task 5.2)
+  // ---------------------------------------------------------------------
+
+  it("cupom expirado e rejeitado no checkout com 400, sem criar pedido", async () => {
+    const code = `EXPIRADO${suffix}`;
+    await admin.from("coupons").insert({
+      store_id: storeId,
+      code,
+      discount_type: "fixed",
+      discount_value: 5,
+      active: true,
+      expires_at: new Date(Date.now() - 60_000).toISOString(),
+    });
+
+    const response = await checkout(
+      jsonRequest("http://localhost/api/checkout", "POST", {
+        storeId,
+        customerName: "Cliente Cupom Expirado",
+        customerPhone: "11999990009",
+        fulfillmentType: "pickup",
+        items: [{ productId, quantity: 1 }],
+        paymentMethod: "on_delivery",
+        couponCode: code,
+      }),
+    );
+
+    expect(response.status).toBe(400);
+    const body = (await response.json()) as { error: string };
+    expect(body.error).toBeTruthy();
+
+    const { data } = await admin.from("orders").select("id").eq("customer_phone", "11999990009");
+    expect(data).toHaveLength(0);
+  }, { retry: 3, timeout: 30000 });
+
+  it("cupom de frete gratis zera o valor do frete sem alterar o subtotal dos produtos", async () => {
+    const code = `FRETEGRATIS${suffix}`;
+    await admin.from("coupons").insert({
+      store_id: storeId,
+      code,
+      discount_type: "free_shipping",
+      discount_value: null,
+      active: true,
+      expires_at: null,
+    });
+
+    // 5km fora do raio gratis (2km) x R$3/km = R$9 de frete, que o cupom
+    // deve zerar sem alterar o subtotal dos produtos.
+    const fetchSpy = stubOpenRouteServiceDistance(5);
+    vi.stubGlobal("fetch", fetchSpy);
+
+    const response = await checkout(
+      jsonRequest("http://localhost/api/checkout", "POST", {
+        storeId,
+        customerName: "Cliente Frete Gratis",
+        customerPhone: "11999990010",
+        fulfillmentType: "delivery",
+        deliveryAddress: { street: "Rua Teste", number: "789" },
+        items: [{ productId, quantity: 1 }],
+        paymentMethod: "on_delivery",
+        couponCode: code,
+      }),
+    );
+
+    expect(response.status).toBe(201);
+    const body = (await response.json()) as {
+      order: { subtotal: number; shipping_cost: number; discount: number; total: number };
+    };
+    expect(body.order.subtotal).toBe(productPrice);
+    expect(body.order.shipping_cost).toBe(0);
+    expect(body.order.total).toBe(productPrice);
+  }, { retry: 3, timeout: 30000 });
+
+  it("cupom percentual aplica desconto sobre o subtotal", async () => {
+    const code = `PERCENT10-${suffix}`;
+    await admin.from("coupons").insert({
+      store_id: storeId,
+      code,
+      discount_type: "percentage",
+      discount_value: 10,
+      active: true,
+      expires_at: null,
+    });
+
+    const response = await checkout(
+      jsonRequest("http://localhost/api/checkout", "POST", {
+        storeId,
+        customerName: "Cliente Cupom Percentual",
+        customerPhone: "11999990011",
+        fulfillmentType: "pickup",
+        items: [{ productId, quantity: 1 }],
+        paymentMethod: "on_delivery",
+        couponCode: code.toLowerCase(),
+      }),
+    );
+
+    expect(response.status).toBe(201);
+    const body = (await response.json()) as {
+      order: { subtotal: number; discount: number; total: number };
+    };
+    expect(body.order.subtotal).toBe(productPrice);
+    expect(body.order.discount).toBe(Math.round(productPrice * 0.1 * 100) / 100);
+    expect(body.order.total).toBe(Math.round((productPrice - productPrice * 0.1) * 100) / 100);
+  }, { retry: 3, timeout: 30000 });
+
+  it("cupom com desconto fixo maior que o total nunca deixa o total negativo", async () => {
+    const code = `FIXOALTO-${suffix}`;
+    await admin.from("coupons").insert({
+      store_id: storeId,
+      code,
+      discount_type: "fixed",
+      discount_value: 999,
+      active: true,
+      expires_at: null,
+    });
+
+    const response = await checkout(
+      jsonRequest("http://localhost/api/checkout", "POST", {
+        storeId,
+        customerName: "Cliente Cupom Fixo Alto",
+        customerPhone: "11999990012",
+        fulfillmentType: "pickup",
+        items: [{ productId, quantity: 1 }],
+        paymentMethod: "on_delivery",
+        couponCode: code,
+      }),
+    );
+
+    expect(response.status).toBe(201);
+    const body = (await response.json()) as { order: { total: number } };
+    expect(body.order.total).toBe(0);
+  }, { retry: 3, timeout: 30000 });
+
+  it("cupom inexistente/inativo e rejeitado com 400, sem criar pedido", async () => {
+    const response = await checkout(
+      jsonRequest("http://localhost/api/checkout", "POST", {
+        storeId,
+        customerName: "Cliente Cupom Invalido",
+        customerPhone: "11999990013",
+        fulfillmentType: "pickup",
+        items: [{ productId, quantity: 1 }],
+        paymentMethod: "on_delivery",
+        couponCode: "NAO-EXISTE-123",
+      }),
+    );
+
+    expect(response.status).toBe(400);
+    const { data } = await admin.from("orders").select("id").eq("customer_phone", "11999990013");
     expect(data).toHaveLength(0);
   }, { retry: 3, timeout: 30000 });
 });

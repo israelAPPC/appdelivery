@@ -1,7 +1,8 @@
 import "server-only";
 import { createClient } from "@supabase/supabase-js";
-import { createSupabaseServerClient } from "./supabase-server";
+import { createSupabaseAdminClient, createSupabaseServerClient } from "./supabase-server";
 import type { Database } from "./database.types";
+import type { Order } from "./orders";
 
 /**
  * Leitura de dados públicos usados pelo storefront do cliente (PWA por loja):
@@ -79,6 +80,33 @@ export async function getStoreBySlug(slugOrId: string): Promise<StorefrontStore 
 
 function isUuid(value: string): boolean {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
+}
+
+/**
+ * Busca um pedido para a pagina de acompanhamento do cliente final
+ * (`/loja/[slug]/pedido/[orderId]`, Task 5.1).
+ *
+ * Nao existe login de cliente final no MVP (ver SPEC.md): o cliente e
+ * identificado apenas pelo `orderId` do proprio pedido (recebido apos o
+ * checkout), da mesma forma que `app/api/orders/[id]/push-subscription`.
+ * `orders` nao tem policy de SELECT publica (dados do cliente/endereco), por
+ * isso usamos aqui o client `service_role` — SEMPRE filtrando por `storeId`
+ * explicitamente (nunca confia so no `orderId`) e retornando `null` (nunca
+ * lanca excecao) quando o pedido nao existe ou pertence a outra loja.
+ */
+export async function getOrderForStorefront(orderId: string, storeId: string): Promise<Order | null> {
+  const admin = createSupabaseAdminClient();
+
+  const { data, error } = await admin
+    .from("orders")
+    .select("*")
+    .eq("id", orderId)
+    .eq("store_id", storeId)
+    .maybeSingle();
+
+  if (error || !data) return null;
+
+  return data as unknown as Order;
 }
 
 export type StorefrontProduct = {
@@ -163,5 +191,63 @@ export async function getStoreProducts(storeId: string): Promise<StorefrontProdu
       error,
     });
     return MOCK_PRODUCTS;
+  }
+}
+
+export type ProductReviewSummary = {
+  averageRating: number | null;
+  totalReviews: number;
+};
+
+/**
+ * Media de estrelas + total de avaliacoes de um produto, exibida na vitrine
+ * pública (Task 5.1). `product_reviews` (migration 0014) tem policy de
+ * SELECT pública (`using (true)`), por isso o client anon já pode ler
+ * diretamente aqui — sem necessidade do client admin.
+ *
+ * Nunca lança exceção: em caso de falha de query, retorna "sem avaliações"
+ * (não deve derrubar a renderização da vitrine por causa disso).
+ */
+export async function getProductReviewSummaries(
+  productIds: string[],
+): Promise<Record<string, ProductReviewSummary>> {
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+  if (!supabaseUrl || !supabaseAnonKey || productIds.length === 0) return {};
+
+  try {
+    const client = createClient<Database>(supabaseUrl, supabaseAnonKey, {
+      auth: { autoRefreshToken: false, persistSession: false },
+    });
+
+    const { data, error } = await client
+      .from("product_reviews")
+      .select("product_id, rating")
+      .in("product_id", productIds);
+
+    if (error || !data) {
+      console.error("getProductReviewSummaries: falha ao buscar avaliações", { productIds, error });
+      return {};
+    }
+
+    const grouped = data.reduce<Record<string, number[]>>((acc, review) => {
+      const ratings = acc[review.product_id] ?? [];
+      ratings.push(review.rating);
+      acc[review.product_id] = ratings;
+      return acc;
+    }, {});
+
+    return Object.fromEntries(
+      Object.entries(grouped).map(([productId, ratings]) => [
+        productId,
+        {
+          averageRating: ratings.reduce((sum, rating) => sum + rating, 0) / ratings.length,
+          totalReviews: ratings.length,
+        },
+      ]),
+    );
+  } catch (error) {
+    console.error("getProductReviewSummaries: exceção ao buscar avaliações", { productIds, error });
+    return {};
   }
 }

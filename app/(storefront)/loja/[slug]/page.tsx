@@ -1,5 +1,11 @@
 import { notFound } from "next/navigation";
-import { getStoreBySlug, getStoreProducts, type StorefrontProduct } from "@/app/lib/storefront-data";
+import {
+  getProductReviewSummaries,
+  getStoreBySlug,
+  getStoreProducts,
+  type ProductReviewSummary,
+  type StorefrontProduct,
+} from "@/app/lib/storefront-data";
 
 type PageProps = {
   params: { slug: string };
@@ -17,6 +23,7 @@ export default async function StorePage({ params }: PageProps) {
   }
 
   const products = await getStoreProducts(store.id);
+  const reviewSummaries = await getProductReviewSummaries(products.map((product) => product.id));
   const productsByCategory = groupByCategory(products);
 
   return (
@@ -35,7 +42,11 @@ export default async function StorePage({ params }: PageProps) {
             </h2>
             <div className="flex flex-col gap-3">
               {items.map((product) => (
-                <ProductCard key={product.id} product={product} />
+                <ProductCard
+                  key={product.id}
+                  product={product}
+                  reviewSummary={reviewSummaries[product.id] ?? null}
+                />
               ))}
             </div>
           </section>
@@ -65,7 +76,13 @@ function StoreHeader({ name, logoUrl }: { name: string; logoUrl: string | null }
   );
 }
 
-function ProductCard({ product }: { product: StorefrontProduct }) {
+function ProductCard({
+  product,
+  reviewSummary,
+}: {
+  product: StorefrontProduct;
+  reviewSummary: ProductReviewSummary | null;
+}) {
   return (
     <article className="flex items-center gap-3 rounded-lg border border-border bg-surface p-3">
       <div className="h-16 w-16 shrink-0 overflow-hidden rounded-md bg-muted">
@@ -82,6 +99,7 @@ function ProductCard({ product }: { product: StorefrontProduct }) {
       <div className="flex flex-1 flex-col gap-1">
         <p className="font-medium text-foreground">{product.name}</p>
         <p className="text-sm text-muted-foreground">{formatCurrency(product.price)}</p>
+        <p className="text-xs text-muted-foreground">{formatReviewSummary(reviewSummary)}</p>
       </div>
       <button
         type="button"
@@ -91,6 +109,15 @@ function ProductCard({ product }: { product: StorefrontProduct }) {
       </button>
     </article>
   );
+}
+
+function formatReviewSummary(reviewSummary: ProductReviewSummary | null): string {
+  if (!reviewSummary || reviewSummary.totalReviews === 0 || reviewSummary.averageRating === null) {
+    return "Sem avaliações ainda";
+  }
+  return `★ ${reviewSummary.averageRating.toFixed(1)} (${reviewSummary.totalReviews} avaliaç${
+    reviewSummary.totalReviews === 1 ? "ão" : "ões"
+  })`;
 }
 
 function groupByCategory(products: StorefrontProduct[]): Record<string, StorefrontProduct[]> {

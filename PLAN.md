@@ -177,8 +177,8 @@
 - Agent: backend-reports
 - Output: `app/(admin)/financeiro/page.tsx`, `app/api/reports/sales/route.ts` (filtro por período e forma de pagamento)
 - Testes críticos:
-  - [ ] Filtro "última semana" soma apenas pedidos `payment_status: paid` no intervalo correto
-  - [ ] Segmentação por forma de pagamento bate com a soma total do período
+  - [x] Filtro "última semana" soma apenas pedidos `payment_status: paid` no intervalo correto
+  - [x] Segmentação por forma de pagamento bate com a soma total do período
 
 ---
 

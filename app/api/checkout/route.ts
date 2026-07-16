@@ -47,7 +47,7 @@ type CheckoutBody = {
   deliveryAddress?: unknown;
   items?: unknown;
   paymentMethod?: unknown;
-  discount?: unknown;
+  couponCode?: unknown;
 };
 
 /**
@@ -154,9 +154,11 @@ export async function POST(request: Request) {
     );
   }
 
-  // Cupom/desconto e escopo da Fase 5: aceita discount=0 (padrao) por
-  // enquanto, sem calcular regra de cupom, nunca bloqueando o checkout.
-  const discount = isFiniteNumber(body.discount) && body.discount > 0 ? body.discount : 0;
+  // Cupom (Task 5.2): opcional. Nunca confia em nenhum valor de desconto
+  // vindo pronto do client — o cupom e sempre buscado no banco pelo codigo,
+  // e o desconto e sempre recalculado aqui a partir do cupom real (mesma
+  // regra de seguranca ja aplicada a preco/frete nesta rota).
+  const couponCode = isNonEmptyString(body.couponCode) ? body.couponCode.trim() : null;
 
   const admin = createSupabaseAdminClient();
 
@@ -232,7 +234,50 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: shippingResult.error }, { status: 400 });
   }
 
-  const shippingCost = shippingResult.shippingCost;
+  let shippingCost = shippingResult.shippingCost;
+
+  // Cupom (Task 5.2): buscado por (store_id, lower(code)) — nunca confia em
+  // discount_type/discount_value vindo do client, so no codigo digitado.
+  // Cupom de frete gratis so zera o `shippingCost` ja calculado acima (a
+  // logica de distancia/raio continua rodando normalmente, ver
+  // .claude/skills/calculo-frete/SKILL.md) — nunca altera o subtotal.
+  let discount = 0;
+  if (couponCode !== null) {
+    // `ilike` faz comparacao case-insensitive; escapa `%`/`_` do codigo
+    // digitado para que nao sejam interpretados como wildcards do padrao.
+    const escapedCouponCode = couponCode.replace(/[%_]/g, (match) => `\\${match}`);
+    const { data: coupon, error: couponError } = await admin
+      .from("coupons")
+      .select("discount_type, discount_value, active, expires_at")
+      .eq("store_id", storeId)
+      .ilike("code", escapedCouponCode)
+      .maybeSingle();
+
+    if (couponError) {
+      console.error("[api/checkout] Falha ao buscar cupom", { storeId, couponCode, error: couponError });
+      return NextResponse.json({ error: "Erro interno ao validar o cupom." }, { status: 500 });
+    }
+
+    if (!coupon || !coupon.active) {
+      return NextResponse.json({ error: "Cupom invalido ou inexistente." }, { status: 400 });
+    }
+
+    if (coupon.expires_at !== null && new Date(coupon.expires_at).getTime() < Date.now()) {
+      return NextResponse.json({ error: "Cupom expirado." }, { status: 400 });
+    }
+
+    if (coupon.discount_type === "percentage") {
+      discount = Math.round(subtotal * ((coupon.discount_value ?? 0) / 100) * 100) / 100;
+    } else if (coupon.discount_type === "fixed") {
+      discount = coupon.discount_value ?? 0;
+    } else if (coupon.discount_type === "free_shipping") {
+      shippingCost = 0;
+    }
+  }
+
+  // Nunca deixa o desconto exceder subtotal + frete (evita total negativo e
+  // mantem o valor de `discount` persistido consistente com o total real).
+  discount = Math.min(discount, Math.round((subtotal + shippingCost) * 100) / 100);
 
   const total = calculateOrderTotal({ subtotal, shippingCost, discount });
 

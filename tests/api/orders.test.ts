@@ -377,3 +377,165 @@ describe("PATCH /api/orders/[id]", () => {
     expect(response.status).toBe(500);
   });
 });
+
+describe("PATCH /api/orders/[id] — markAsPaid (pagar na entrega/retirada)", () => {
+  /** Builder do SELECT que busca o pedido atual (status + pagamento) antes do UPDATE/refetch. */
+  function makeCurrentOrderFetchBuilder(result: { data: unknown; error: unknown }) {
+    const builder = {
+      select: vi.fn(() => builder),
+      eq: vi.fn(() => builder),
+      single: vi.fn(() => Promise.resolve(result)),
+    };
+    return builder;
+  }
+
+  function mockMarkAsPaidFlow(
+    current: { status: string; payment_method: string; payment_status: string },
+  ): { fetchBuilder: ReturnType<typeof makeCurrentOrderFetchBuilder> };
+  function mockMarkAsPaidFlow(
+    current: { status: string; payment_method: string; payment_status: string },
+    updateResult: { data: unknown; error: unknown },
+  ): {
+    fetchBuilder: ReturnType<typeof makeCurrentOrderFetchBuilder>;
+    updateBuilder: ReturnType<typeof makeOrderUpdateBuilder>;
+  };
+  function mockMarkAsPaidFlow(
+    current: { status: string; payment_method: string; payment_status: string },
+    updateResult?: { data: unknown; error: unknown },
+  ) {
+    const fetchBuilder = makeCurrentOrderFetchBuilder({
+      data: { id: ORDER_ID, ...current },
+      error: null,
+    });
+    if (!updateResult) {
+      mockFrom.mockReturnValueOnce(fetchBuilder);
+      return { fetchBuilder };
+    }
+    const updateBuilder = makeOrderUpdateBuilder(updateResult);
+    mockFrom.mockReturnValueOnce(fetchBuilder).mockReturnValueOnce(updateBuilder);
+    return { fetchBuilder, updateBuilder };
+  }
+
+  beforeEach(() => {
+    mockGetSession.mockReset();
+    mockGetStorePermissions.mockReset();
+    mockFrom.mockReset();
+    mockSendOrderStatusNotification.mockReset();
+    mockSendOrderStatusNotification.mockResolvedValue(undefined);
+    mockGetSession.mockResolvedValue({ user: { id: "user-1" }, accessToken: "token-abc" });
+    mockGetStorePermissions.mockResolvedValue({
+      role: "admin",
+      permissions: { orders: true, catalog: true, financial: true, settings: true },
+    });
+  });
+
+  it("marca um pedido on_delivery com payment_status pending_offline como pago", async () => {
+    const updatedOrder = {
+      id: ORDER_ID,
+      store_id: STORE_ID,
+      payment_method: "on_delivery",
+      payment_status: "paid",
+    };
+    const { updateBuilder } = mockMarkAsPaidFlow(
+      { status: "entrega", payment_method: "on_delivery", payment_status: "pending_offline" },
+      { data: updatedOrder, error: null },
+    );
+
+    const response = await PATCH(patchRequest({ markAsPaid: true, storeId: STORE_ID }), {
+      params: { id: ORDER_ID },
+    });
+
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as { order: { payment_status: string } };
+    expect(body.order.payment_status).toBe("paid");
+    expect(updateBuilder.update).toHaveBeenCalledWith({ payment_status: "paid" });
+    expect(updateBuilder.eq).toHaveBeenCalledWith("id", ORDER_ID);
+    expect(updateBuilder.eq).toHaveBeenCalledWith("store_id", STORE_ID);
+    // markAsPaid nunca dispara a notificacao de mudanca de status operacional.
+    expect(mockSendOrderStatusNotification).not.toHaveBeenCalled();
+  });
+
+  it("400 ao tentar marcar como pago um pedido mp_online (so o webhook do Mercado Pago pode)", async () => {
+    const { fetchBuilder } = mockMarkAsPaidFlow({
+      status: "entrega",
+      payment_method: "mp_online",
+      payment_status: "pending",
+    });
+    void fetchBuilder;
+
+    const response = await PATCH(patchRequest({ markAsPaid: true, storeId: STORE_ID }), {
+      params: { id: ORDER_ID },
+    });
+
+    expect(response.status).toBe(400);
+  });
+
+  it("400 ao tentar marcar como pago um pedido on_delivery com payment_status diferente de pending_offline (ex.: failed)", async () => {
+    mockMarkAsPaidFlow({ status: "entrega", payment_method: "on_delivery", payment_status: "failed" });
+
+    const response = await PATCH(patchRequest({ markAsPaid: true, storeId: STORE_ID }), {
+      params: { id: ORDER_ID },
+    });
+
+    expect(response.status).toBe(400);
+  });
+
+  it("idempotente: marcar como pago um pedido on_delivery ja pago retorna 200 sem novo UPDATE", async () => {
+    // Primeira chamada a `from`: busca o pedido atual (ja pago). Segunda
+    // chamada: refetch do pedido completo para a resposta (sem UPDATE, ja
+    // que marcar como pago um pedido ja pago nao gera efeito colateral).
+    const initialFetch = makeCurrentOrderFetchBuilder({
+      data: { id: ORDER_ID, status: "concluido", payment_method: "on_delivery", payment_status: "paid" },
+      error: null,
+    });
+    const refetchBuilder = makeOrderFetchBuilder({
+      data: {
+        id: ORDER_ID,
+        store_id: STORE_ID,
+        payment_method: "on_delivery",
+        payment_status: "paid",
+        status: "concluido",
+      },
+      error: null,
+    });
+    mockFrom.mockReturnValueOnce(initialFetch).mockReturnValueOnce(refetchBuilder);
+
+    const response = await PATCH(patchRequest({ markAsPaid: true, storeId: STORE_ID }), {
+      params: { id: ORDER_ID },
+    });
+
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as { order: { payment_status: string } };
+    expect(body.order.payment_status).toBe("paid");
+    expect(mockFrom).toHaveBeenCalledTimes(2);
+  });
+
+  it("marca como pago e avanca o status operacional na mesma requisicao", async () => {
+    const updatedOrder = {
+      id: ORDER_ID,
+      store_id: STORE_ID,
+      status: "concluido",
+      payment_method: "on_delivery",
+      payment_status: "paid",
+    };
+    const { updateBuilder } = mockMarkAsPaidFlow(
+      { status: "entrega", payment_method: "on_delivery", payment_status: "pending_offline" },
+      { data: updatedOrder, error: null },
+    );
+
+    const response = await PATCH(
+      patchRequest({ status: "concluido", markAsPaid: true, storeId: STORE_ID }),
+      { params: { id: ORDER_ID } },
+    );
+
+    expect(response.status).toBe(200);
+    expect(updateBuilder.update).toHaveBeenCalledWith({ status: "concluido", payment_status: "paid" });
+    expect(mockSendOrderStatusNotification).toHaveBeenCalledTimes(1);
+  });
+
+  it("400 quando nem 'status' nem 'markAsPaid' sao informados", async () => {
+    const response = await PATCH(patchRequest({ storeId: STORE_ID }), { params: { id: ORDER_ID } });
+    expect(response.status).toBe(400);
+    expect(mockFrom).not.toHaveBeenCalled();
+  });
+});
